@@ -1,0 +1,34 @@
+# Python / entorno
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+env/
+venv/
+*.egg-info/
+dist/
+build/
+
+# Ultralytics / salidas de entrenamiento y pesos
+runs/
+*.pt
+*.onnx
+*.engine
+
+# Datos y medios (evita subir datasets y videos pesados)
+data/
+datasets/
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.log
+
+# Archivos temporales y del sistema/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Cachés varias
+*.cache
