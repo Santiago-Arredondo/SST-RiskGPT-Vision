@@ -1,0 +1,12 @@
+ultralytics>=8.3.70
+torch>=2.6
+torchvision>=0.21
+pillow
+numpy
+pyyaml
+gradio>=4.44.1
+gradio_client>=1.3.0
+fastapi==0.111.0
+uvicorn==0.30.1
+scikit-learn
+opencv-python

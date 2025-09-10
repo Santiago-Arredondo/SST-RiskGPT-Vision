@@ -1,0 +1,35 @@
+Prototipo listo para usar que detecta **riesgos mecánicos y locativos** en imágenes y videos y entrega **recomendaciones** priorizadas por **Jerarquía de Control**.
+
+## Características
+- **Detección** de objetos con YOLOv8 (Ultralytics).
+- **Inferencia** de riesgos con **reglas declarativas** basadas en una ontología (`risk_ontology.yaml`).
+- **Recomendaciones** por **eliminación, sustitución, ingeniería, administrativos y EPP** + referencias normativas base.
+- **Chat** descriptivo de hallazgos (salida en lenguaje natural).
+- **Evaluación** automática contra etiquetas de expertos (Precision/Recall/F1 micro y Cohen’s Kappa).
+- **UI web** (imágenes y video) y **API REST** (FastAPI).
+
+## Estructura del repositorio
+├─ requirements.txt
+├─ risk_ontology.yaml
+├─ detector.py
+├─ rules_engine.py
+├─ chat_layer.py
+├─ app_fastapi.py
+├─ ui_gradio.py
+├─ video_analyzer.py
+├─ ui_gradio_video.py
+├─ train_yolo.py
+├─ evaluator.py
+└─ gen_synthetic_sst.py
+
+- **Python 3.10+**
+- **FFmpeg** (solo si usarás video)
+- (Windows) OpenCV ya incluye dependencias comunes en los wheels.
+
+Instalación:
+```bash
+python -m venv .venv
+# Windows:
+.\.venv\Scripts\activate
+pip install --upgrade pip
+pip install -r requirements.txt

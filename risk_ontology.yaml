@@ -1,0 +1,64 @@
+# Ontología de riesgos: escenarios normalizados + recomendaciones (jerarquía de control) + normas base
+normas:
+  decreto_1072_2015: "Decreto 1072 de 2015 - SG-SST (Colombia)"
+  res_0312_2019: "Resolución 0312 de 2019 - Estándares mínimos SG-SST"
+  iso_45001_2018: "ISO 45001:2018 - Sistemas de gestión de SST"
+
+riesgos:
+  atrapamiento_atropellamiento:
+    nombre: "Atrapamiento / Atropellamiento por equipos móviles"
+    tipo: "mecanico"
+    disparadores:
+      - all_of: [person]
+        any_of: [forklift, truck, car, excavator, bus]
+    recomendaciones:
+      eliminacion:
+        - "Separar físicamente rutas peatonales del tránsito de equipos móviles."
+      sustitucion:
+        - "Implementar equipos con detección de proximidad/frenado automático."
+      ingenieria:
+        - "Barreras físicas, demarcación de rutas y espejos en cruces."
+        - "Alarmas visuales/auditivas en intersecciones."
+      administrativos:
+        - "Plan de tráfico interno, permisos, formación y verificación pre-operacional."
+      epp:
+        - "Chaleco alta visibilidad, casco, botas con puntera."
+    normas: [decreto_1072_2015, res_0312_2019, iso_45001_2018]
+
+  contacto_partes_moviles:
+    nombre: "Contacto con partes móviles / maquinaria"
+    tipo: "mecanico"
+    disparadores:
+      - all_of: [person]
+        any_of: [conveyor, machine, saw, press]
+    recomendaciones:
+      eliminacion:
+        - "Bloqueo y etiquetado (LOTO) durante mantenimiento/limpieza."
+      sustitucion:
+        - "Sustituir equipos sin resguardos por alternativas seguras."
+      ingenieria:
+        - "Guardas fijas/interbloqueadas y paradas de emergencia."
+      administrativos:
+        - "Procedimientos escritos, permisos y señalización."
+      epp:
+        - "Guantes adecuados y gafas."
+    normas: [decreto_1072_2015, res_0312_2019, iso_45001_2018]
+
+  caidas_mismo_nivel_obstaculos:
+    nombre: "Caídas al mismo nivel por obstáculos / orden y aseo"
+    tipo: "locativo"
+    disparadores:
+      - all_of: [person]
+        any_of: [pallet, cable, spill, toolbox]
+    recomendaciones:
+      eliminacion:
+        - "Retirar obstáculos y gestionar derrames de inmediato."
+      sustitucion:
+        - "Instalar pisos antideslizantes y cubre-cables."
+      ingenieria:
+        - "Demarcación de pasillos e iluminación adecuada."
+      administrativos:
+        - "Programa 5S/orden y aseo; inspecciones de rutas."
+      epp:
+        - "Calzado antideslizante."
+    normas: [decreto_1072_2015, res_0312_2019, iso_45001_2018]
