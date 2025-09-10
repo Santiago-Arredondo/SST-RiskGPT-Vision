@@ -33,3 +33,21 @@ python -m venv .venv
 .\.venv\Scripts\activate
 pip install --upgrade pip
 pip install -r requirements.txt
+
+## Cómo ejecutar
+
+```powershell
+# 1) Clonar o descomprimir el proyecto
+cd "C:\SST-RiskGPT Vision"
+
+# 2) Crear venv e instalar
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install --upgrade pip
+pip install -r requirements.txt
+
+# 3) Lanzar UI
+python ui_gradio.py
+# Abrir http://127.0.0.1:7860
+# En la casilla "Ruta a modelo YOLO entrenado (.pt)" pegar la ruta local del best.pt
+# Sugerencia: Confianza 0.25–0.35, IoU 0.6
