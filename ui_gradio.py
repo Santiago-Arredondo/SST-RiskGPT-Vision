@@ -12,8 +12,9 @@ from PIL import Image, ImageDraw, ImageFont
 from detector import YoloDetector
 from rules_engine import RiskEngine
 from chat_layer import build_chat_response
+from pathlib import Path
+DEFAULT_WEIGHTS = Path("models/best.pt")
 
-# ---------- cache del detector ----------
 detector = None
 _cached_model_key = None
 _cached_conf = None
@@ -23,19 +24,27 @@ engine = RiskEngine("risk_ontology.yaml")
 
 
 def _ensure_detector(model_path: str | None, conf: float, iou: float):
-    """Carga (o reutiliza) el detector. Si la ruta no existe, hace fallback a pesos por defecto."""
+    """
+    Carga (o reutiliza) el detector. Orden de prioridad:
+    1) Ruta digitada por el usuario (si existe)
+    2) models/best.pt (si existe)
+    3) pesos por defecto de Ultralytics (yolov8n.pt)
+    """
     global detector, _cached_model_key, _cached_conf, _cached_iou
 
     mp = (model_path or "").strip()
     weights = None
     warn = ""
 
-    if mp:
-        p = Path(mp)
-        if p.exists():
-            weights = str(p)
-        else:
-            warn = f"⚠️ Modelo no encontrado en '{mp}'. Se usarán pesos por defecto."
+    # 1) si el usuario escribió algo y existe, úsalo
+    if mp and Path(mp).exists():
+        weights = mp
+    # 2) si no escribió o no existe, intenta models/best.pt
+    elif DEFAULT_WEIGHTS.exists():
+        weights = str(DEFAULT_WEIGHTS)
+    # 3) si tampoco, fallback a yolov8n.pt
+    else:
+        warn = "⚠️ No se encontró un .pt en la ruta indicada ni en models/best.pt; se usarán los pesos por defecto (yolov8n.pt)."
 
     key = weights or "DEFAULT"
     need_reload = (
@@ -46,10 +55,8 @@ def _ensure_detector(model_path: str | None, conf: float, iou: float):
     )
     if need_reload:
         detector = YoloDetector(model_path=weights) if weights else YoloDetector()
-        if hasattr(detector, "conf"):
-            detector.conf = conf
-        if hasattr(detector, "iou"):
-            detector.iou = iou
+        detector.conf = conf
+        detector.iou = iou
         _cached_model_key = key
         _cached_conf = conf
         _cached_iou = iou
@@ -166,10 +173,11 @@ with gr.Blocks(title="Analizador SST — Imágenes") as demo:
         with gr.Column():
             img_in = gr.Image(type="filepath", label="Imagen")
             model_path = gr.Textbox(
-                "",
-                label="Ruta a modelo YOLO entrenado (.pt) — opcional",
-                placeholder="Pega aquí la ruta a tu best.pt (deja vacío para pesos por defecto)",
+            value=str(DEFAULT_WEIGHTS),   # ← se mostrará models/best.pt por defecto
+            label="Ruta a modelo YOLO entrenado (.pt) — opcional",
+            placeholder="Pega aquí otra ruta si prefieres usar otro .pt",
             )
+
             conf = gr.Slider(0.05, 0.90, value=0.25, step=0.05, label="Confianza (conf)")
             iou = gr.Slider(0.20, 0.95, value=0.60, step=0.05, label="IoU (NMS)")
             btn = gr.Button("Analizar", variant="primary")

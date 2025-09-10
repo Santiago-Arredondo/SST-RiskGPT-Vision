@@ -1,6 +1,7 @@
 import gradio as gr, tempfile, os
 from video_analyzer import analyze_video
 
+
 def run(video, model_path, stride, sustain):
     out_path = os.path.join(tempfile.gettempdir(), "annotated.mp4")
     timeline = analyze_video(video, out_path, model_path=model_path or "yolov8n.pt",
