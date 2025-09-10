@@ -1,36 +1,64 @@
-# Python / entorno
+# ===============================
+# SST-RiskGPT Vision - .gitignore
+# ===============================
+
+# Python / Build / Cache
 __pycache__/
 *.py[cod]
 *.pyo
-.venv/
-env/
-venv/
+*.pyd
 *.egg-info/
-dist/
 build/
+dist/
 
-# Ultralytics / salidas de entrenamiento y pesos
-runs/
-*.pt
-*.onnx
-*.engine
+# Entornos virtuales
+.venv/
+venv/
+env/
 
-# Datos y medios (evita subir datasets y videos pesados)
-data/
-datasets/
-*.mp4
-*.avi
-*.mov
-*.mkv
-*.log
-
-# Archivos temporales y del sistema/editor
-.DS_Store
-Thumbs.db
+# IDE/Editor
 .vscode/
 .idea/
+*.code-workspace
 
-# Cachés varias
-*.cache
+# SO
+.DS_Store
+Thumbs.db
+desktop.ini
 
+# Logs / temporales
+*.log
+*.tmp
+tmp/
+logs/
+gradio_cached_examples/
+
+# Artefactos de entrenamiento Ultralytics
+runs/
+
+# Pesos de modelos
+*.pt
+!models/
+!models/*.pt
+
+# Datasets (mantén el repo liviano)
+datasets/**
+!datasets/.gitkeep
+!datasets/sst_sample/
+!datasets/sst_sample/**
+
+# Vídeos/outputs
+outputs/
+*.mp4
+*.avi
+*.mkv
+
+# Notebooks
+*.ipynb_checkpoints/
+
+# Variables de entorno
+.env
+.env.*
+
+# Archivos temporales de Office
 ~$*.docx
