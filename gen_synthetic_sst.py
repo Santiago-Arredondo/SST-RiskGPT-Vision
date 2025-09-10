@@ -60,7 +60,7 @@ def draw_rect(d: ImageDraw.ImageDraw, x1, y1, x2, y2, color, label=None):
     if label:
         d.text((x1+3, y1+3), label, fill=color)
 
-# ---------- generadores de objetos (devuelven (box, clase)) ----------
+
 def add_person(draw, W, H) -> Tuple[Tuple[int,int,int,int], str]:
     w = random.randint(int(0.04*W), int(0.08*W))
     h = random.randint(int(0.18*H), int(0.28*H))
@@ -125,7 +125,6 @@ def add_obstacle(draw, W, H) -> Tuple[Tuple[int,int,int,int], str]:
         draw_rect(draw, *box, (80, 80, 255), "spill")
         return box, kind
 
-# ---------- utilidades ----------
 def near(b1, b2, max_dist=160) -> bool:
     c1 = ((b1[0]+b1[2])/2, (b1[1]+b1[3])/2)
     c2 = ((b2[0]+b2[2])/2, (b2[1]+b2[3])/2)
@@ -193,7 +192,7 @@ def generate_split(root: Path, split: str, n_images: int, W: int, H: int, seed: 
                 b3, a3 = add_obstacle(d, W, H)
                 labels.append((a3, b3))
 
-        else:  # NEG
+        else: 
             if random.random() < 0.5:
                 b, a = add_person(d, W, H);      labels.append((a, b))
             if random.random() < 0.5:

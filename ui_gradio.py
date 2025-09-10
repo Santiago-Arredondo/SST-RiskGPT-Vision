@@ -63,7 +63,6 @@ def _ensure_detector(model_path: str | None, conf: float, iou: float):
     return detector, warn
 
 
-# ---------- normalización de imagen ----------
 def _save_temp_image(im: Image.Image) -> str:
     fd, tmp = tempfile.mkstemp(suffix=".png")
     os.close(fd)
@@ -119,7 +118,6 @@ def _coerce_to_filepath(img_input: Any) -> str:
     raise gr.Error("No se recibió imagen. Sube una imagen por favor.")
 
 
-# ---------- dibujo de cajas ----------
 def draw_boxes(image_path: str, dets):
     img = Image.open(image_path).convert("RGB")
     d = ImageDraw.Draw(img)
@@ -135,7 +133,6 @@ def draw_boxes(image_path: str, dets):
     return img
 
 
-# ---------- función principal ----------
 def analyze(image_input, model_path, conf, iou):
     image_path = _coerce_to_filepath(image_input)
     det, warn = _ensure_detector(model_path, conf, iou)
@@ -165,7 +162,6 @@ def analyze(image_input, model_path, conf, iou):
     return img_out, json_out, resumen, chat
 
 
-# ---------- UI ----------
 with gr.Blocks(title="Analizador SST — Imágenes") as demo:
     gr.Markdown("# Analizador de Riesgos SST (Imágenes)")
     with gr.Row():
@@ -197,11 +193,9 @@ if __name__ == "__main__":
     print(">> Iniciando UI Gradio...")
     port = 7860
     try:
-        try:
-            # Gradio >= 4.4x (API nueva)
+        try:  
             demo.queue(default_concurrency_limit=2, max_size=16)
         except TypeError:
-            # Compatibilidad con versiones que no aceptan ese argumento
             demo.queue()
 
         demo.launch(
