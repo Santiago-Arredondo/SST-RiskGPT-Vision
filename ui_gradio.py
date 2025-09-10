@@ -1,4 +1,3 @@
-# ui_gradio.py
 import json
 import os
 import tempfile

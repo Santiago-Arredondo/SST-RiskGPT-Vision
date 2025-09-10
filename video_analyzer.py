@@ -1,4 +1,3 @@
-# video_analyzer.py
 import argparse, os, cv2, json
 from collections import defaultdict
 from typing import Dict, List, Set
