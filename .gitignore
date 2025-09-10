@@ -32,3 +32,5 @@ Thumbs.db
 
 # Cachés varias
 *.cache
+
+~$*.docx
