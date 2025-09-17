@@ -1,8 +1,5 @@
 # ui_gradio_video.py
-# UI para analizar VIDEO con YOLO + motor de riesgos.
-# - Muestra video anotado
-# - Devuelve timeline JSON de riesgos
-# - Renderiza recomendaciones por riesgo (jerarquía + normas) de risk_ontology.yaml
+# UI Gradio para análisis de VIDEO con recomendaciones por riesgo (jerarquía + normas)
 
 from __future__ import annotations
 import os
@@ -10,149 +7,164 @@ import tempfile
 import gradio as gr
 
 from video_analyzer import analyze_video
-from rules_engine import RiskEngine
-
-# Cargamos la ontología para poder mapear los IDs de normas a texto legible
-ENGINE_UI = RiskEngine("risk_ontology.yaml")
 
 
-def render_risk_recos(risk_id: str, risk_name: str, recos: dict, stats: dict | None) -> str:
-    """
-    Construye un bloque Markdown con:
-      - Título del riesgo
-      - Estadísticos (eventos y duración)
-      - Acciones por jerarquía de control
-      - Normativas aplicables (texto desde risk_ontology.yaml)
-    """
-    md = [f"### {risk_name}"]
+# ------------------------- helpers de presentación ------------------------- #
 
-    if stats:
-        ev = stats.get("events", 0)
-        dur = stats.get("duration_sec", 0.0)
-        md.append(f"- **Eventos**: {ev} · **Duración total**: ~{dur:.1f}s")
+def _fmt_seconds(sec: float) -> str:
+    try:
+        return f"{sec:.1f}s"
+    except Exception:
+        return f"{sec}"
 
-    md.append("**Jerarquía de control:**")
-    for capa, titulo in [
-        ("eliminacion", "Eliminación"),
-        ("sustitucion", "Sustitución"),
-        ("ingenieria", "Ingeniería"),
-        ("administrativos", "Administrativos"),
-        ("epp", "EPP"),
-    ]:
-        items = recos.get(capa, [])
+def build_summary(result: dict) -> str:
+    """Texto corto tipo 'Riesgos detectados' con eventos y duración."""
+    stats = result.get("risk_stats", {}) or {}
+    names = result.get("risk_names", {}) or {}
+    if not stats:
+        return "Sin inferencias de riesgo."
+    lines = ["Riesgos detectados:"]
+    for rid, data in stats.items():
+        ev = int(data.get("events", 0))
+        dur = _fmt_seconds(float(data.get("duration_sec", 0.0)))
+        lines.append(f"- {names.get(rid, rid)} — Eventos: {ev}, Duración total: ~{dur}")
+    return "\n".join(lines)
+
+def recs_section_html(risk_title: str, stats: dict, recs: dict) -> str:
+    """Bloque HTML por riesgo con Jerarquía y Normas."""
+    ev = int(stats.get("events", 0))
+    dur = _fmt_seconds(float(stats.get("duration_sec", 0.0)))
+    html = [f"### {risk_title}", f"*Eventos: {ev} · Duración total: ~{dur}*"]
+
+    # Jerarquía de control
+    html.append("**Jerarquía de control:**")
+    order = [
+        ("eliminacion", "eliminación"),
+        ("sustitucion", "sustitución"),
+        ("ingenieria", "ingeniería"),
+        ("administrativos", "administrativos"),
+        ("epp", "epp"),
+    ]
+    any_item = False
+    for k, label in order:
+        items = recs.get(k) or []
         if items:
-            md.append(f"- **{titulo}:**")
+            any_item = True
+            html.append(f"- **{label.capitalize()}:**")
             for it in items:
-                md.append(f"  - {it}")
+                html.append(f"  - {it}")
+    if not any_item:
+        html.append("- (sin recomendaciones registradas)")
 
-    normas_ids = recos.get("normas", [])
-    normas_txt = [ENGINE_UI.normas[nid] for nid in normas_ids if nid in ENGINE_UI.normas]
-    if normas_txt:
-        md.append("**Normativas:**")
-        for n in normas_txt:
-            md.append(f"- {n}")
+    # Normas
+    normas = recs.get("normas") or recs.get("normativas") or []
+    if normas:
+        html.append("**Normativas:**")
+        for n in normas:
+            html.append(f"- {n}")
 
-    return "\n".join(md)
+    return "\n".join(html)
 
+def build_recs_panel(result: dict) -> str:
+    """Panel Markdown con recomendaciones por cada riesgo activo en el video."""
+    stats = result.get("risk_stats", {}) or {}
+    names = result.get("risk_names", {}) or {}
+    recs_all = result.get("recommendations", {}) or {}
+
+    if not stats:
+        return "_No se detectaron riesgos en el período analizado._"
+
+    # Ordenar por duración descendente para priorizar lo más importante
+    ordered = sorted(stats.items(), key=lambda kv: float(kv[1].get("duration_sec", 0.0)), reverse=True)
+
+    sections = []
+    sections.append(f"**Elementos detectados:** {', '.join(result.get('classes_present', [])) or '—'}")
+    sections.append("")
+    for rid, st in ordered:
+        title = names.get(rid, rid)
+        recs = recs_all.get(rid, {}) or {}
+        sections.append(recs_section_html(title, st, recs))
+        sections.append("")  # espacio entre riesgos
+
+    return "\n".join(sections).strip()
+
+
+# ------------------------------- lógica UI -------------------------------- #
 
 def run(
-    video_path: str | None,
-    model_path: str,
-    stride: int,
-    sustain: int,
-    conf: float,
-    iou: float,
-    imgsz: int,
-    use_pose: bool,
-    near_thr: float,
-    hand_thr: float,
+    video,
+    model_path,
+    conf,
+    iou,
+    stride,
+    sustain,
+    imgsz,
+    use_pose,
+    near_thr,
+    hand_thr,
 ):
-    if not video_path:
-        raise gr.Error("Sube un video .mp4 para analizar.")
+    if video is None:
+        raise gr.Error("Sube un video (.mp4) para analizar.")
 
-    # Salida temporal del mp4 anotado
+    # salida del video anotado en temp
     out_path = os.path.join(tempfile.gettempdir(), "annotated.mp4")
 
-    try:
-        res = analyze_video(
-            video_path,
-            out_path,
-            model_path=model_path.strip() or None,
-            stride=int(stride),
-            risk_sustain=int(sustain),
-            conf=float(conf),
-            iou=float(iou),
-            imgsz=int(imgsz),
-            use_pose=bool(use_pose),
-            near_thr=float(near_thr),
-            hand_thr=float(hand_thr),
-        )
-    except Exception as e:
-        raise gr.Error(f"Error procesando el video: {e}")
+    # llamar al analizador
+    result = analyze_video(
+        video_path=video,
+        out_path=out_path,
+        model_path=(model_path or None),
+        stride=int(stride),
+        risk_sustain=int(sustain),
+        conf=float(conf),
+        iou=float(iou),
+        imgsz=int(imgsz),
+        use_pose=bool(use_pose),
+        near_thr=float(near_thr),
+        hand_thr=float(hand_thr),
+    )
 
-    # Markdown de salida con clases presentes y recos por riesgo
-    clases = ", ".join(res.get("classes_present", [])) or "—"
-    md_blocks = [f"**Elementos detectados:** {clases}"]
+    # salidas a UI
+    resumen = build_summary(result)
+    recs_md = build_recs_panel(result)
 
-    recos = res.get("recommendations", {})
-    rnames = res.get("risk_names", {})
-    rstats = res.get("risk_stats", {})
-
-    if recos:
-        for rid in sorted(recos.keys(), key=lambda k: rnames.get(k, k).lower()):
-            md_blocks.append(
-                render_risk_recos(
-                    rid,
-                    rnames.get(rid, rid),
-                    recos[rid],
-                    rstats.get(rid, {}),
-                )
-            )
-    else:
-        md_blocks.append("_Sin riesgos inferidos._")
-
-    md_final = "\n\n".join(md_blocks)
-
-    # JSON compacto útil para depurar / auditoría
-    json_out = {
-        "timeline": res.get("timeline", []),
-        "risk_stats": rstats,
-    }
-
-    return out_path, json_out, md_final
+    # Nota: Gradio Video acepta la ruta al mp4 generado
+    return out_path, result, resumen, recs_md
 
 
 with gr.Blocks(title="Analizador SST — Video") as demo:
     gr.Markdown("# Analizador de Riesgos SST (Video)")
 
     with gr.Row():
-        with gr.Column():
+        # --------------------- Entrada y parámetros --------------------- #
+        with gr.Column(scale=1):
             v_in = gr.Video(label="Video (mp4)")
             model = gr.Textbox("", label="Ruta a modelo YOLO (.pt) — opcional")
             conf = gr.Slider(0.05, 0.95, value=0.35, step=0.01, label="Confianza detección (conf)")
             iou = gr.Slider(0.3, 0.9, value=0.6, step=0.01, label="IoU NMS (iou)")
             stride = gr.Slider(1, 10, value=5, step=1, label="Stride (1 procesa más frames; 10 menos)")
             sustain = gr.Slider(1, 10, value=6, step=1, label="Persistencia (frames) de riesgo activo")
-            imgsz = gr.Dropdown(choices=[640, 960, 1280], value=640, label="Tamaño de inferencia (imgsz)")
-
-            gr.Markdown("### Proximidad avanzada")
+            imgsz = gr.Dropdown(choices=["640", "960", "1280"], value="640", label="Tamaño de inferencia (imgsz)")
             use_pose = gr.Checkbox(value=True, label="Usar YOLOv8-Pose (muñecas)")
-            near_thr = gr.Slider(0.05, 0.30, value=0.16, step=0.01, label="Umbral proximidad persona–máquina")
-            hand_thr = gr.Slider(0.03, 0.20, value=0.06, step=0.01, label="Umbral proximidad mano–máquina")
+            near_thr = gr.Slider(0.05, 0.5, value=0.16, step=0.01, label="Umbral proximidad persona–máquina (dist. normalizada)")
+            hand_thr = gr.Slider(0.03, 0.2, value=0.06, step=0.01, label="Umbral proximidad mano–máquina (dist. normalizada)")
 
             btn = gr.Button("Analizar video", variant="primary")
 
-        with gr.Column():
+        # --------------------- Salidas --------------------- #
+        with gr.Column(scale=1):
             v_out = gr.Video(label="Video anotado")
-            j_out = gr.JSON(label="Timeline de riesgos")
-            md_recos = gr.Markdown(label="Recomendaciones y normativas")
+            j_out = gr.JSON(label="Resultados (JSON)")  # timeline, stats, recomendaciones…
+            resumen = gr.Textbox(label="Resumen", lines=6)
+            recs_panel = gr.Markdown()  # recomendaciones por riesgo
 
     btn.click(
         run,
-        inputs=[v_in, model, stride, sustain, conf, iou, imgsz, use_pose, near_thr, hand_thr],
-        outputs=[v_out, j_out, md_recos],
+        inputs=[v_in, model, conf, iou, stride, sustain, imgsz, use_pose, near_thr, hand_thr],
+        outputs=[v_out, j_out, resumen, recs_panel],
     )
 
 if __name__ == "__main__":
-    print(">> UI de video en http://127.0.0.1:7861")
-    demo.launch(server_name="127.0.0.1", server_port=7861, show_api=False)
+    print(">> UI de video (puerto automático)")
+    # Puerto automático para evitar el error "Cannot find empty port"
+    demo.launch(server_name="127.0.0.1", server_port=None, show_api=False)
