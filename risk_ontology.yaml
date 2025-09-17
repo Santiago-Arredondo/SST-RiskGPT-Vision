@@ -1,39 +1,61 @@
-# Ontología de riesgos: escenarios normalizados + recomendaciones (jerarquía de control) + normas base
+# Ontología de riesgos (mecánicos, locativos y ergonomía)
 normas:
   decreto_1072_2015: "Decreto 1072 de 2015 - SG-SST (Colombia)"
   res_0312_2019: "Resolución 0312 de 2019 - Estándares mínimos SG-SST"
   iso_45001_2018: "ISO 45001:2018 - Sistemas de gestión de SST"
 
 riesgos:
+  caidas_mismo_nivel_obstaculos:
+    id: "caidas_mismo_nivel_obstaculos"
+    nombre: "Caídas al mismo nivel por obstáculos / orden y aseo"
+    tipo: "locativo"
+    disparadores:
+      # por objetos de piso o por token de pies cercanos
+      - all_of: [person]
+        any_of: [pallet, cable, spill, toolbox, foot_near_floor_hazard]
+    recomendaciones:
+      eliminacion:
+        - "Retirar obstáculos y gestionar derrames de inmediato."
+      sustitucion:
+        - "Instalar pisos antideslizantes y cubre-cables."
+      ingenieria:
+        - "Demarcación de pasillos e iluminación adecuada."
+      administrativos:
+        - "Programa 5S/orden y aseo; inspecciones periódicas."
+      epp:
+        - "Calzado antideslizante."
+    normas: [decreto_1072_2015, res_0312_2019, iso_45001_2018]
+
   atrapamiento_atropellamiento:
-    nombre: "Atrapamiento / Atropellamiento por equipos móviles"
+    id: "atrapamiento_atropellamiento"
+    nombre: "Atrapamiento / atropellamiento por equipos móviles"
     tipo: "mecanico"
     disparadores:
       - all_of: [person]
-        any_of: [forklift, truck, car, excavator, bus]
+        any_of: [near_person_vehicle]  # token de proximidad
     recomendaciones:
       eliminacion:
-        - "Separar físicamente rutas peatonales del tránsito de equipos móviles."
+        - "Separar físicamente rutas peatonales del tránsito vehicular."
       sustitucion:
-        - "Implementar equipos con detección de proximidad/frenado automático."
+        - "Equipos con detección de proximidad/frenado automático."
       ingenieria:
-        - "Barreras físicas, demarcación de rutas y espejos en cruces."
-        - "Alarmas visuales/auditivas en intersecciones."
+        - "Barreras, demarcación de rutas y espejos en cruces."
       administrativos:
-        - "Plan de tráfico interno, permisos, formación y verificación pre-operacional."
+        - "Plan de tráfico interno; permisos y formación del personal."
       epp:
         - "Chaleco alta visibilidad, casco, botas con puntera."
     normas: [decreto_1072_2015, res_0312_2019, iso_45001_2018]
 
   contacto_partes_moviles:
+    id: "contacto_partes_moviles"
     nombre: "Contacto con partes móviles / maquinaria"
     tipo: "mecanico"
     disparadores:
-      - all_of: [person]
-        any_of: [conveyor, machine, saw, press]
+      # Requiere token de proximidad; evitamos disparar solo por ver 'machine'
+      - any_of: [near_hand_machine, near_person_machine]
     recomendaciones:
       eliminacion:
-        - "Bloqueo y etiquetado (LOTO) durante mantenimiento/limpieza."
+        - "Aplicar LOTO durante mantenimiento/limpieza."
       sustitucion:
         - "Sustituir equipos sin resguardos por alternativas seguras."
       ingenieria:
@@ -44,21 +66,22 @@ riesgos:
         - "Guantes adecuados y gafas."
     normas: [decreto_1072_2015, res_0312_2019, iso_45001_2018]
 
-  caidas_mismo_nivel_obstaculos:
-    nombre: "Caídas al mismo nivel por obstáculos / orden y aseo"
-    tipo: "locativo"
+  ergonomia_puesto_oficina:
+    id: "ergonomia_puesto_oficina"
+    nombre: "Ergonomía en puesto de oficina"
+    tipo: "ergonomico"
     disparadores:
-      - all_of: [person]
-        any_of: [pallet, cable, spill, toolbox]
+      # Se dispara por tokens de postura (no requiere detectar 'chair/screen')
+      - any_of: [pose_back_flexion, pose_neck_flexion, pose_wrist_above_elbow]
     recomendaciones:
       eliminacion:
-        - "Retirar obstáculos y gestionar derrames de inmediato."
+        - "Evitar posturas sostenidas con flexión de tronco o cuello."
       sustitucion:
-        - "Instalar pisos antideslizantes y cubre-cables."
+        - "Silla con soporte lumbar y ajuste en altura; pantalla independiente si usas portátil."
       ingenieria:
-        - "Demarcación de pasillos e iluminación adecuada."
+        - "Altura de silla/mesa: codos ~90°, pies apoyados; pantalla a la altura de los ojos."
       administrativos:
-        - "Programa 5S/orden y aseo; inspecciones de rutas."
+        - "Pausas activas cada 45–60 min; rotación de tareas."
       epp:
-        - "Calzado antideslizante."
+        - "Apoya-pies si no se alcanza ángulo de 90° en rodillas; apoya-muñecas si aplica."
     normas: [decreto_1072_2015, res_0312_2019, iso_45001_2018]

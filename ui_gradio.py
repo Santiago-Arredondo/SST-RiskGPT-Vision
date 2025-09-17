@@ -1,9 +1,11 @@
-import json
-import os
-import tempfile
-from pathlib import Path
-from typing import Any
+# ui_gradio.py
+# Analizador de Riesgos SST (Imágenes) con soporte de postura (YOLOv8-Pose)
+# - Detecta objetos con YOLOv8 (vía detector.YoloDetector)
+# - Genera tokens de postura (espalda/cuello/muñeca) con YOLOv8-Pose
+# - Infiera riesgos con rules_engine.RiskEngine a partir de clases + tokens
+# - Muestra recomendaciones por jerarquía de control y normas
 
+import os
 import gradio as gr
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
@@ -11,209 +13,193 @@ from PIL import Image, ImageDraw, ImageFont
 from detector import YoloDetector
 from rules_engine import RiskEngine
 from chat_layer import build_chat_response
-from pathlib import Path
-DEFAULT_WEIGHTS = Path("models/best.pt")
 
-detector = None
-_cached_model_key = None
-_cached_conf = None
-_cached_iou = None
+# --------- Pose helpers (para ergonomía sin anotar chair/screen) ---------
+try:
+    from ultralytics import YOLO as _UltralyticsYOLO
+    _ULTRA_OK = True
+except Exception:
+    _ULTRA_OK = False
 
-engine = RiskEngine("risk_ontology.yaml")
+_POSE_MODEL = None  # cache global
 
-
-def _ensure_detector(model_path: str | None, conf: float, iou: float):
-    """
-    Carga (o reutiliza) el detector. Orden de prioridad:
-    1) Ruta digitada por el usuario (si existe)
-    2) models/best.pt (si existe)
-    3) pesos por defecto de Ultralytics (yolov8n.pt)
-    """
-    global detector, _cached_model_key, _cached_conf, _cached_iou
-
-    mp = (model_path or "").strip()
-    weights = None
-    warn = ""
-
-    # 1) si el usuario escribió algo y existe, úsalo
-    if mp and Path(mp).exists():
-        weights = mp
-    # 2) si no escribió o no existe, intenta models/best.pt
-    elif DEFAULT_WEIGHTS.exists():
-        weights = str(DEFAULT_WEIGHTS)
-    # 3) si tampoco, fallback a yolov8n.pt
-    else:
-        warn = "⚠️ No se encontró un .pt en la ruta indicada ni en models/best.pt; se usarán los pesos por defecto (yolov8n.pt)."
-
-    key = weights or "DEFAULT"
-    need_reload = (
-        detector is None
-        or _cached_model_key != key
-        or _cached_conf != conf
-        or _cached_iou != iou
-    )
-    if need_reload:
-        detector = YoloDetector(model_path=weights) if weights else YoloDetector()
-        detector.conf = conf
-        detector.iou = iou
-        _cached_model_key = key
-        _cached_conf = conf
-        _cached_iou = iou
-
-    return detector, warn
-
-
-def _save_temp_image(im: Image.Image) -> str:
-    fd, tmp = tempfile.mkstemp(suffix=".png")
-    os.close(fd)
-    im.save(tmp, format="PNG")
-    return tmp
-
-
-def _save_temp_ndarray(arr: np.ndarray) -> str:
-    if arr.ndim == 2:  # grayscale → RGB
-        arr = np.stack([arr] * 3, axis=-1)
-    if arr.ndim == 3 and arr.shape[2] == 4:  # RGBA → RGB
-        arr = arr[:, :, :3]
-    im = Image.fromarray(arr.astype(np.uint8))
-    return _save_temp_image(im)
-
-
-def _coerce_to_filepath(img_input: Any) -> str:
-    """
-    Acepta: str/Path, PIL.Image, np.ndarray, dict con 'path'/'name'/'image',
-    o lista de cualquiera de los anteriores. Devuelve siempre una RUTA.
-    """
-    if isinstance(img_input, (list, tuple)) and img_input:
-        for it in img_input:
+def _get_pose_model():
+    """Carga perezosa de YOLOv8-Pose (cpu). Devuelve False si no disponible."""
+    global _POSE_MODEL
+    if _POSE_MODEL is None:
+        if not _ULTRA_OK:
+            _POSE_MODEL = False
+        else:
             try:
-                return _coerce_to_filepath(it)
+                _POSE_MODEL = _UltralyticsYOLO("yolov8n-pose.pt")
+            except Exception:
+                _POSE_MODEL = False
+    return _POSE_MODEL
+
+def _posture_tokens_pil(pil_img: Image.Image):
+    """
+    Devuelve un set de tokens de postura:
+      - pose_back_flexion
+      - pose_neck_flexion
+      - pose_wrist_above_elbow
+    """
+    m = _get_pose_model()
+    toks = set()
+    if not m:
+        return toks
+
+    arr = np.array(pil_img.convert("RGB"))
+    try:
+        r = m.predict(source=arr, imgsz=640, verbose=False, device="cpu")[0]
+        kps = r.keypoints
+        if kps is None:
+            return toks
+        xy = kps.xy.cpu().numpy()  # (N, K, 2) en formato COCO
+        for kp in xy:
+            # COCO idx: 0 nose, 5 L-shoulder, 6 R-shoulder, 11 L-hip, 12 R-hip,
+            # 7/8 elbows, 9/10 wrists
+            try:
+                nose = kp[0]
+                l_sh, r_sh = kp[5], kp[6]
+                l_hip, r_hip = kp[11], kp[12]
+                l_elb, r_elb = kp[7], kp[8]
+                l_wri, r_wri = kp[9], kp[10]
             except Exception:
                 continue
-        raise gr.Error("No se pudo leer ninguna imagen de la lista proporcionada.")
 
-    if isinstance(img_input, (str, Path)):
-        p = str(img_input)
-        if os.path.exists(p):
-            return p
+            spine_mid = ((l_sh[0] + r_sh[0]) / 2, (l_sh[1] + r_sh[1]) / 2)
+            hip_mid = ((l_hip[0] + r_hip[0]) / 2, (l_hip[1] + r_hip[1]) / 2)
 
-    if isinstance(img_input, dict):
-        for k in ("path", "name"):
-            v = img_input.get(k)
-            if isinstance(v, str) and os.path.exists(v):
-                return v
-        for k in ("image", "composite", "background"):
-            v = img_input.get(k)
-            if isinstance(v, Image.Image):
-                return _save_temp_image(v.convert("RGB"))
-            if isinstance(v, np.ndarray):
-                return _save_temp_ndarray(v)
+            # Inclinación de espalda: vector (hip->spine) vs vertical
+            v = (spine_mid[0] - hip_mid[0], spine_mid[1] - hip_mid[1])
+            n = max((v[0] ** 2 + v[1] ** 2) ** 0.5, 1e-6)
+            cosang = (v[1] / n)  # producto con (0,1)
+            import math
+            back_tilt = abs(90 - abs(math.degrees(math.acos(max(-1.0, min(1.0, cosang))))))
+            if back_tilt > 20:  # umbral conservador
+                toks.add("pose_back_flexion")
 
-    if isinstance(img_input, Image.Image):
-        return _save_temp_image(img_input.convert("RGB"))
+            # Inclinación de cuello: vector (spine_mid->nose) vs vertical
+            v2 = (nose[0] - spine_mid[0], nose[1] - spine_mid[1])
+            n2 = max((v2[0] ** 2 + v2[1] ** 2) ** 0.5, 1e-6)
+            cosang2 = (v2[1] / n2)
+            neck_tilt = abs(90 - abs(math.degrees(math.acos(max(-1.0, min(1.0, cosang2))))))
+            if neck_tilt > 20:
+                toks.add("pose_neck_flexion")
 
-    if isinstance(img_input, np.ndarray):
-        return _save_temp_ndarray(img_input)
+            # Muñecas por encima de codos (postura no neutra)
+            if l_wri[1] < l_elb[1] or r_wri[1] < r_elb[1]:
+                toks.add("pose_wrist_above_elbow")
+    except Exception:
+        # Fallo silencioso de pose (no bloquea UX)
+        pass
+    return toks
 
-    raise gr.Error("No se recibió imagen. Sube una imagen por favor.")
-
-
-def draw_boxes(image_path: str, dets):
-    img = Image.open(image_path).convert("RGB")
-    d = ImageDraw.Draw(img)
+# --------- Dibujo de cajas ---------
+def draw_boxes(img: Image.Image, dets):
+    pil = img.copy().convert("RGB")
+    d = ImageDraw.Draw(pil)
     try:
         font = ImageFont.truetype("arial.ttf", 16)
     except Exception:
         font = None
     for det in dets:
         x1, y1, x2, y2 = det["box"]
-        d.rectangle([x1, y1, x2, y2], outline=(255, 0, 0), width=2)
-        label = f"{det['cls']} {det.get('conf', 0):.2f}"
-        d.text((x1 + 3, y1 + 3), label, fill=(255, 0, 0), font=font)
-    return img
+        d.rectangle([x1, y1, x2, y2], outline=(255, 128, 0), width=2)
+        label = f"{det['cls']} {det.get('conf', 0.0):.2f}"
+        d.text((x1 + 3, max(3, y1 + 3)), label, fill=(255, 128, 0), font=font)
+    return pil
 
+def recs_markdown(risks, recs_by_id):
+    """Devuelve un Markdown compacto con jerarquía de control + normas por riesgo."""
+    if not risks:
+        return ""
+    lines = []
+    for r in risks:
+        rid = r.get("id") or r.get("risk") or ""
+        nombre = r.get("nombre", rid)
+        tipo = r.get("tipo", "")
+        lines.append(f"**{nombre}** ({tipo})")
+        recs = recs_by_id.get(rid, {})
+        for nivel in ["eliminacion", "sustitucion", "ingenieria", "administrativos", "epp"]:
+            items = recs.get(nivel, [])
+            if items:
+                pretty = nivel.capitalize()
+                lines.append(f"- *{pretty}:* " + "; ".join(items))
+        normas = r.get("normas", []) or recs.get("normas", [])
+        if normas:
+            lines.append("- *Normas:* " + ", ".join(normas))
+        lines.append("")  # línea en blanco
+    return "\n".join(lines).strip()
 
-def analyze(image_input, model_path, conf, iou):
-    image_path = _coerce_to_filepath(image_input)
-    det, warn = _ensure_detector(model_path, conf, iou)
+# --------- Inicialización de motores ---------
+detector = YoloDetector()                  # usa yolov8n.pt por defecto si no pasas .pt
+engine = RiskEngine("risk_ontology.yaml")  # usa tu ontología con ergonomía por postura
 
-    preds = det.predict(image_path)  # YOLO lee el array/ruta internamente
-    det_objs = det.to_dicts(preds)
-    present = det.classes_from_dicts(det_objs)
+# --------- Lógica principal ---------
+def analyze(image: Image.Image, model_path: str):
+    if image is None:
+        raise gr.Error("No se recibió imagen. Sube una imagen por favor.")
 
-    risks = engine.infer(present)
-    recs = {r["id"]: engine.recommendations(r["id"]) for r in risks}
-    chat = build_chat_response(present, risks, recs)
+    global detector
+    model_path = (model_path or "").strip()
+    if model_path:
+        if not os.path.exists(model_path):
+            raise gr.Error(f"No existe el archivo de modelo: {model_path}")
+        # recargar detector con pesos del usuario
+        detector = YoloDetector(model_path=model_path)
 
-    img_out = draw_boxes(image_path, det_objs)
+    # 1) Detección
+    np_img = np.array(image.convert("RGB"))
+    det_objs = detector.to_dicts(detector.predict(np_img))
+    present = set(detector.classes_from_dicts(det_objs))
+
+    # 2) Postura (tokens de ergonomía)
+    pose_toks = _posture_tokens_pil(image)
+    present |= pose_toks  # unión
+
+    # 3) Reglas de riesgo + recomendaciones
+    risks = engine.infer(sorted(present))
+    recs = {r.get("id", r.get("risk", "")): engine.recommendations(r.get("id", r.get("risk", ""))) for r in risks}
+
+    # 4) Chat en lenguaje natural (opcional)
+    chat = build_chat_response(sorted(present), risks, recs)
+
+    # 5) Imagen con cajas y salidas
+    img_out = draw_boxes(image, det_objs)
     json_out = {
-        "classes_present": present,
+        "classes_present": sorted(present),
         "detections": det_objs,
         "risks": risks,
         "recommendations": recs,
+        "pose_tokens": sorted(pose_toks) if pose_toks else [],
     }
-
     resumen = "Riesgos detectados:\n" + "\n".join(
-        [f"- {r['nombre']} ({r['tipo']})" for r in risks]
+        f"- {r.get('nombre', r.get('id',''))} ({r.get('tipo','')})" for r in risks
     ) if risks else "Sin inferencias de riesgo."
-    if warn:
-        resumen = warn + "\n\n" + resumen
 
-    return img_out, json_out, resumen, chat
+    recs_md = recs_markdown(risks, recs)
 
+    return img_out, json_out, resumen, chat, recs_md
 
-with gr.Blocks(title="Analizador SST — Imágenes") as demo:
+# --------- UI Gradio ---------
+with gr.Blocks(title="Analizador de Riesgos SST (Imágenes)") as demo:
     gr.Markdown("# Analizador de Riesgos SST (Imágenes)")
     with gr.Row():
         with gr.Column():
-            img_in = gr.Image(type="filepath", label="Imagen")
-            model_path = gr.Textbox(
-            value=str(DEFAULT_WEIGHTS),   # ← se mostrará models/best.pt por defecto
-            label="Ruta a modelo YOLO entrenado (.pt) — opcional",
-            placeholder="Pega aquí otra ruta si prefieres usar otro .pt",
-            )
-
-            conf = gr.Slider(0.05, 0.90, value=0.25, step=0.05, label="Confianza (conf)")
-            iou = gr.Slider(0.20, 0.95, value=0.60, step=0.05, label="IoU (NMS)")
-            btn = gr.Button("Analizar", variant="primary")
+            img_in = gr.Image(type="pil", label="Imagen")
+            model_path = gr.Textbox("", label="Ruta a modelo YOLO entrenado (.pt) — opcional")
+            btn = gr.Button("Analizar")
         with gr.Column():
             img_out = gr.Image(type="pil", label="Detecciones")
             json_out = gr.JSON(label="Salida JSON")
             txt_resumen = gr.Textbox(label="Resumen", lines=8)
             txt_chat = gr.Markdown()
-
-    btn.click(
-        analyze,
-        inputs=[img_in, model_path, conf, iou],
-        outputs=[img_out, json_out, txt_resumen, txt_chat],
-    )
-
+            md_recs = gr.Markdown(label="Recomendaciones")
+    btn.click(analyze, inputs=[img_in, model_path], outputs=[img_out, json_out, txt_resumen, txt_chat, md_recs])
 
 if __name__ == "__main__":
-    print(">> Iniciando UI Gradio...")
-    port = 7860
-    try:
-        try:  
-            demo.queue(default_concurrency_limit=2, max_size=16)
-        except TypeError:
-            demo.queue()
+    print(">> UI de video (puerto automático)")
+    demo.launch(server_name="127.0.0.1", server_port=None, show_api=False)  # None => elige un puerto libre
 
-        demo.launch(
-            server_name="127.0.0.1",
-            server_port=port,
-            show_api=False,
-            inbrowser=False,
-            share=False,
-            debug=True,
-        )
-    except OSError:
-        # si el puerto está ocupado, intenta el siguiente
-        print(f"[WARN] Puerto {port} ocupado. Intentando 7861...")
-        demo.launch(
-            server_name="127.0.0.1",
-            server_port=7861,
-            show_api=False,
-            inbrowser=False,
-            share=False,
-            debug=True,
-        )
+
