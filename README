@@ -48,5 +48,6 @@ pip install -r requirements.txt
 
 # 3) Lanzar UI
 python ui_gradio.py
+python ui_gradio_video.py
 # Abrir http://127.0.0.1:7860
 # Sugerencia: Confianza 0.25–0.35, IoU 0.6

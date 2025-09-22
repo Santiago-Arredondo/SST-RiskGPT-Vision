@@ -1,111 +1,138 @@
+# Envoltura de YOLO para inferencia en imágenes con parámetros configurables.
+
 from __future__ import annotations
 import os
-from typing import Any, Dict, List, Optional
+import tempfile
+from typing import Any, Dict, List, Optional, Union
 
 import numpy as np
-import cv2
+from PIL import Image
 
 try:
     from ultralytics import YOLO
     YOLO_AVAILABLE = True
 except Exception:
     YOLO_AVAILABLE = False
-    YOLO = None  # type: ignore
 
 
 class YoloDetector:
-    def __init__(self, model_path: Optional[str] = None):
-        """
-        model_path:
-          - Ruta a .pt entrenado (recomendado: models/best.pt)
-          - Si no existe, cae a yolov8n.pt
-        """
+    """
+    Carga un modelo YOLO y permite predecir sobre rutas de imagen, PIL.Image o numpy arrays.
+    Acepta conf, iou e imgsz desde __init__ para que la UI pueda ajustarlos.
+    """
+
+    def __init__(
+        self,
+        model_path: Optional[str] = None,
+        conf: float = 0.25,
+        iou: float = 0.60,
+        imgsz: int = 960,
+        device: str = "cpu",
+    ):
         if not YOLO_AVAILABLE:
-            raise RuntimeError(
-                "Ultralytics/YOLO no está instalado. Ejecuta: pip install ultralytics"
-            )
+            raise RuntimeError("Ultralytics/YOLO no está disponible. Instala 'ultralytics'.")
 
+        # Resolución del modelo por defecto: models/best.pt -> yolov8n.pt
+        resolved = None
         if model_path and os.path.exists(model_path):
-            self.model_path = model_path
+            resolved = model_path
         else:
-            default_best = os.path.join("models", "best.pt")
-            self.model_path = default_best if os.path.exists(default_best) else "yolov8n.pt"
+            best_local = os.path.join("models", "best.pt")
+            resolved = best_local if os.path.exists(best_local) else "yolov8n.pt"
 
+        self.model_path = resolved
         self.model = YOLO(self.model_path)
-        # nombres de clases
-        self.names = self.model.names if hasattr(self.model, "names") else {i: str(i) for i in range(1000)}
+        self.names = self.model.names if hasattr(self.model, "names") else {}
+        self.conf = float(conf)
+        self.iou = float(iou)
+        self.imgsz = int(imgsz)
+        self.device = device
 
-    # --------------------
-    # Inferencia YOLO
-    # --------------------
-    def _to_rgb_ndarray(self, image: Any) -> np.ndarray:
-        """
-        Acepta PIL.Image, ruta str o np.ndarray. Devuelve np.ndarray RGB.
-        """
-        if isinstance(image, str):
-            # Ultralytics acepta rutas; dejamos que lea él
-            # pero para homogeneidad devolvemos None aquí
-            # y predict usará la ruta directamente.
-            return None  # type: ignore
+    # -------------------- helpers --------------------
 
-        if isinstance(image, np.ndarray):
-            arr = image
-            # si es BGR (OpenCV), convertir a RGB opcionalmente
-            if arr.ndim == 3 and arr.shape[2] == 3:
-                # Intentamos detectar si parece BGR por estadísticos; en la práctica
-                # nos sirve igual pasarlo como está, pero preferimos RGB.
-                # Convertimos siempre de BGR->RGB si proviene de cv2.
-                # Si ya era RGB, la inversión solo cambia canales; no afecta YOLO.
-                return cv2.cvtColor(arr, cv2.COLOR_BGR2RGB)
-            elif arr.ndim == 2:
-                return cv2.cvtColor(arr, cv2.COLOR_GRAY2RGB)
-            elif arr.ndim == 3 and arr.shape[2] == 4:
-                return cv2.cvtColor(arr, cv2.COLOR_BGRA2RGB)
-            else:
-                raise ValueError("ndarray con forma no soportada.")
+    @staticmethod
+    def _pil_to_rgb_array(img: Image.Image) -> np.ndarray:
+        """Convierte PIL -> numpy RGB uint8 HxWxC."""
+        if img.mode != "RGB":
+            img = img.convert("RGB")
+        return np.asarray(img)
+
+    @staticmethod
+    def _ensure_hwc_uint8(arr: np.ndarray) -> np.ndarray:
+        """Asegura HxWxC y dtype uint8 para YOLO."""
+        if arr is None:
+            raise ValueError("Imagen vacía.")
+        if arr.ndim == 2:
+            arr = np.stack([arr, arr, arr], axis=-1)
+        if arr.ndim != 3 or arr.shape[2] not in (3, 4):
+            raise ValueError(f"Array con forma no válida para imagen: {arr.shape}")
+        if arr.shape[2] == 4:
+            # RGBA -> RGB
+            arr = arr[:, :, :3]
+        if arr.dtype != np.uint8:
+            arr = arr.astype(np.uint8)
+        return arr
+
+    # -------------------- API pública --------------------
+
+    def predict(self, source: Union[str, Image.Image, np.ndarray]):
+        """
+        Devuelve la lista de Results de Ultralytics para 1 imagen.
+        Acepta ruta, PIL.Image o numpy array HxWxC.
+        Para mayor compatibilidad, si es PIL o array, escribimos un temporal.
+        """
+        if isinstance(source, str):
+            src = source
+            write_temp = False
+            tmp_path = None
+        elif isinstance(source, Image.Image):
+            arr = self._ensure_hwc_uint8(self._pil_to_rgb_array(source))
+            # Ultralytics acepta arrays, pero para evitar rarezas, guardamos temporal.
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg")
+            Image.fromarray(arr).save(tmp.name, format="JPEG", quality=95)
+            src = tmp.name
+            write_temp = True
+            tmp_path = tmp.name
+            tmp.close()
+        elif isinstance(source, np.ndarray):
+            arr = self._ensure_hwc_uint8(source)
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg")
+            Image.fromarray(arr).save(tmp.name, format="JPEG", quality=95)
+            src = tmp.name
+            write_temp = True
+            tmp_path = tmp.name
+            tmp.close()
         else:
-            # Probablemente PIL.Image
-            try:
-                from PIL import Image
-                if isinstance(image, Image.Image):
-                    return np.array(image.convert("RGB"))
-            except Exception:
-                pass
-            raise ValueError("Tipo de imagen no soportado. Usa PIL, ndarray o ruta a archivo.")
+            raise TypeError(f"Tipo de fuente no soportado: {type(source)}")
 
-    def predict(self, image: Any, conf: float = 0.35, iou: float = 0.6, imgsz: int = 960):
+        try:
+            results = self.model.predict(
+                source=src,
+                conf=self.conf,
+                iou=self.iou,
+                imgsz=self.imgsz,
+                device=self.device,
+                verbose=False,
+            )
+            return results
+        finally:
+            if 'write_temp' in locals() and write_temp and tmp_path and os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except Exception:
+                    pass
+
+    def to_dicts(self, results) -> List[Dict[str, Any]]:
         """
-        Ejecuta predicción YOLO.
-          - image puede ser ruta (str), PIL.Image o np.ndarray
+        Convierte Results de Ultralytics (para 1 imagen) en una lista de dicts:
+        [{"cls": "person", "conf": 0.87, "box": [x1,y1,x2,y2]}, ...]
         """
-        if isinstance(image, str):
-            src = image
-        else:
-            # convertir a RGB ndarray
-            src = self._to_rgb_ndarray(image)
-
-        result_list = self.model.predict(
-            source=src,
-            conf=conf,
-            iou=iou,
-            imgsz=imgsz,
-            verbose=False,
-            device="cpu",
-        )
-        return result_list
-
-    # --------------------
-    # Conversión de resultados
-    # --------------------
-    def to_dicts(self, result_list) -> List[Dict[str, Any]]:
         dets: List[Dict[str, Any]] = []
-        if not result_list:
+        if not results:
             return dets
-
-        r = result_list[0]
+        r = results[0]  # una sola imagen
         if not hasattr(r, "boxes") or r.boxes is None:
             return dets
-
         boxes = r.boxes
         for i in range(len(boxes)):
             cls_raw = boxes.cls[i]
@@ -113,76 +140,11 @@ class YoloDetector:
             cls_id = int(getattr(cls_raw, "item", lambda: cls_raw)())
             conf = float(getattr(conf_raw, "item", lambda: conf_raw)())
             x1, y1, x2, y2 = boxes.xyxy[i].tolist()
-            dets.append(
-                {
-                    "cls": self.names.get(cls_id, str(cls_id)),
-                    "conf": conf,
-                    "box": [float(x1), float(y1), float(x2), float(y2)],
-                }
-            )
+            cname = self.names.get(cls_id, str(cls_id))
+            dets.append({"cls": cname, "conf": conf, "box": [float(x1), float(y1), float(x2), float(y2)]})
         return dets
 
     @staticmethod
-    def classes_from_dicts(det_list: List[Dict[str, Any]]) -> List[str]:
-        return sorted({d["cls"] for d in det_list})
-
-    # --------------------
-    # Heurísticas de piso: cable / spill
-    # --------------------
-    def heuristics_floor_hazards(self, img_bgr: np.ndarray) -> List[Dict[str, Any]]:
-        """
-        Heurísticas simples en la zona baja de la imagen para detectar obstáculos de piso:
-        - cable: contornos largos y delgados
-        - spill: manchas oscuras/compactas
-        Devuelve lista de pseudo-detecciones con cls, conf y box.
-        """
-        out: List[Dict[str, Any]] = []
-
-        if img_bgr is None or img_bgr.ndim != 3:
-            return out
-
-        H, W = img_bgr.shape[:2]
-        # Zona inferior (piso)
-        y0 = int(0.55 * H)
-        roi = img_bgr[y0:H, :]
-
-        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-
-        # ---- CABLES (bordes alargados/finos) ----
-        edges = cv2.Canny(gray, 60, 160)
-        edges = cv2.dilate(edges, cv2.getStructuringElement(cv2.MORPH_RECT, (7, 1)), 1)
-        cnts, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        for c in cnts:
-            x, y, w, h = cv2.boundingRect(c)
-            area = w * h
-            aspect = (w + 1e-3) / (h + 1e-3)
-            # umbrales conservadores para evitar falsos positivos
-            if aspect > 6.0 and 60 < area < 40000 and h < 40:
-                out.append(
-                    {
-                        "cls": "cable",
-                        "conf": 0.30,
-                        "box": [float(x), float(y + y0), float(x + w), float(y + y0 + h)],
-                    }
-                )
-
-        # ---- SPILL (manchas oscuras) ----
-        blur = cv2.GaussianBlur(gray, (5, 5), 0)
-        thr_val = float(np.percentile(blur, 30))  # 30% más oscuro
-        _, th = cv2.threshold(blur, thr_val, 255, cv2.THRESH_BINARY_INV)
-        th = cv2.morphologyEx(th, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8), iterations=1)
-
-        cnts2, _ = cv2.findContours(th, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        for c in cnts2:
-            x, y, w, h = cv2.boundingRect(c)
-            area = w * h
-            if area > 1500 and w > 40 and h > 20:
-                out.append(
-                    {
-                        "cls": "spill",
-                        "conf": 0.30,
-                        "box": [float(x), float(y + y0), float(x + w), float(y + y0 + h)],
-                    }
-                )
-
-        return out
+    def classes_from_dicts(dets: List[Dict[str, Any]]) -> List[str]:
+        """Clases únicas presentes en los detections."""
+        return sorted({d["cls"] for d in dets})

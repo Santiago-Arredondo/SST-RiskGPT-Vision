@@ -1,60 +1,28 @@
-# Python / Build / Cache
+﻿# Python
 __pycache__/
-*.py[cod]
+*.pyc
 *.pyo
 *.pyd
-*.egg-info/
-build/
-dist/
-
-# Entornos virtuales
 .venv/
-venv/
-env/
+.env
 
-# IDE/Editor
+# IDEs
 .vscode/
 .idea/
-*.code-workspace
 
-# SO
-.DS_Store
-Thumbs.db
-desktop.ini
-
-# Logs / temporales
-*.log
-*.tmp
-tmp/
-logs/
-gradio_cached_examples/
-
-# Artefactos de entrenamiento Ultralytics
+# Datos pesados / runs locales
 runs/
+datasets/
+D:/datasets/
 
-# Pesos de modelos
+# Modelos binarios (pero permitimos models/*.pt vía LFS)
 *.pt
 !models/
 !models/*.pt
 
-# Datasets (mantén el repo liviano)
-datasets/**
-!datasets/.gitkeep
-!datasets/sst_sample/
-!datasets/sst_sample/**
+# Archivos temporales
+*.tmp
+*.log
 
-# Vídeos/outputs
-outputs/
-*.mp4
-*.avi
-*.mkv
-
-# Notebooks
-*.ipynb_checkpoints/
-
-# Variables de entorno
-.env
-.env.*
-
-# Archivos temporales de Office
+# Word temp locks
 ~$*.docx
