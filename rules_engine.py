@@ -1,118 +1,79 @@
 # rules_engine.py
 from __future__ import annotations
-from typing import Any, Dict, List, Set, Optional
-import os, yaml
+import yaml
+from typing import Dict, Any, List, Set, Optional
+from pathlib import Path
 
 class RiskEngine:
-    def __init__(self, ontology_path: str, default_context: str = "industrial"):
-        if not os.path.exists(ontology_path):
-            raise FileNotFoundError(f"No existe ontología: {ontology_path}")
-        with open(ontology_path, "r", encoding="utf-8") as f:
-            data = yaml.safe_load(f)
-        self.normas: Dict[str, str] = data.get("normas", {})
-        self.risks: Dict[str, Any] = data.get("riesgos", {})
-        self.default_context = default_context
+    """
+    Carga risk_ontology.yaml y permite inferir riesgos a partir de:
+      - present: set[str] con clases/tokens presentes
+      - ctx_tokens: se derivan para office/industrial/obra
+    Ontología esperada:
+      meta: ...
+      context_tokens: {office:{any:[...]}, industrial:{any:[...]}, obra:{any:[...]}}
+      riesgos: [ {id, nombre, when_any, when_all?, context?, jerarquia[], normas[]} ]
+    """
 
-    @staticmethod
-    def _as_set(x) -> Set[str]:
-        if x is None: return set()
-        if isinstance(x, str): return {x}
-        return set(x)
+    def __init__(self, path: str | Path = "risk_ontology.yaml"):
+        self.path = Path(path)
+        if not self.path.exists():
+            raise FileNotFoundError(f"Ontología no encontrada: {self.path}")
+        data = yaml.safe_load(self.path.read_text(encoding="utf-8")) or {}
+        self.meta: Dict[str, Any] = data.get("meta", {})
+        self.ctx_defs: Dict[str, Dict[str, List[str]]] = data.get("context_tokens", {})
+        self.risks: List[Dict[str, Any]] = data.get("riesgos", [])
+        if not isinstance(self.risks, list):
+            raise ValueError("El nodo 'riesgos' debe ser una lista de dicts.")
 
-    def _trigger_matches(
-        self,
-        trigger: Dict[str, Any],
-        present: Set[str],
-        tokens: Set[str],
-    ) -> bool:
-        all_of = self._as_set(trigger.get("all_of"))
-        any_of = self._as_set(trigger.get("any_of"))
-        none_of = self._as_set(trigger.get("none_of"))
-        tokens_any = self._as_set(trigger.get("tokens_any"))
+    # ---------- utilidades de contexto ----------
+    def infer_contexts(self, present: Set[str]) -> Set[str]:
+        ctx: Set[str] = set()
+        for cname, rule in self.ctx_defs.items():
+            any_list = set(rule.get("any", []))
+            if any_list & present:
+                ctx.add(cname)
+        return ctx
 
-        if all_of and not all_of.issubset(present):
-            return False
-        if any_of and present.isdisjoint(any_of):
-            return False
-        if none_of and not none_of.isdisjoint(present):
-            return False
-        if tokens_any and tokens.isdisjoint(tokens_any):
-            return False
-        return True
+    def _ctx_match(self, allowed: Optional[str], active_ctx: Set[str]) -> bool:
+        if not allowed:
+            return True
+        # allowed: "office|industrial|obra"
+        allow = set([s.strip() for s in allowed.split("|") if s.strip()])
+        return bool(allow & active_ctx)
 
-    def infer(
-        self,
-        present_with_ctx: List[str] | Set[str],
-        context: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
-        """
-        present_with_ctx = conjunto de clases detectadas + tokens (p.ej. near_person_vehicle).
-        context = industrial|bodega|obra|via_publica|oficina  (default: self.default_context)
-        """
-        context = (context or self.default_context).strip().lower()
-        present_set = set(present_with_ctx)
-        # separa tokens (por convención: tienen guiones o son "near_*" / "poor_*" / "foot_*" etc.)
-        tokens = {t for t in present_set if any(t.startswith(p) for p in ("near_", "foot_", "poor_", "overhead_"))}
-        # clases "puras" (sin tokens)
-        classes = present_set - tokens
+    # ---------- inferencia principal ------------
+    def infer(self, present: List[str] | Set[str]) -> List[Dict[str, Any]]:
+        P: Set[str] = set(present)
+        active_ctx = self.infer_contexts(P)
 
-        matches: List[Dict[str, Any]] = []
-        for rid, rdef in self.risks.items():
-            allowed = set(map(str.lower, rdef.get("contextos_permitidos", [])))
-            if allowed and context not in allowed:
+        inferred: List[Dict[str, Any]] = []
+        for r in self.risks:
+            rid = r.get("id")
+            name = r.get("nombre", rid)
+            when_any = set(r.get("when_any", []))
+            when_all = set(r.get("when_all", []))
+            ctx_rule = r.get("context")  # "office|industrial|obra" or None
+
+            # Debe cumplir contexto si se especifica
+            if not self._ctx_match(ctx_rule, active_ctx):
                 continue
 
-            triggers = rdef.get("disparadores", [])
-            if not triggers:
-                continue
-            # Un riesgo se activa si CUALQUIER trigger OR se cumple
-            if any(self._trigger_matches(tr, classes, tokens) for tr in triggers):
-                matches.append({
+            ok_any = (not when_any) or bool(when_any & P)
+            ok_all = (not when_all) or when_all.issubset(P)
+
+            if ok_any and ok_all:
+                inferred.append({
                     "id": rid,
-                    "nombre": rdef.get("nombre", rid),
-                    "tipo": rdef.get("tipo", "general"),
+                    "nombre": name,
+                    "jerarquia": list(r.get("jerarquia", [])),
+                    "normas": list(r.get("normas", [])),
                 })
-        return matches
+        return inferred
 
-    def recommendations(self, risk_id: str, context: Optional[str] = None) -> Dict[str, List[str]]:
-        context = (context or self.default_context).strip().lower()
-        rdef = self.risks.get(risk_id, {})
-        rec = rdef.get("recomendaciones", {}) or {}
-        # Si en el futuro quieres overrides por contexto, aquí puedes fusionar.
-        # Por ahora devolvemos tal cual, ordenando niveles.
-        ordered = {}
-        for k in ["eliminacion", "sustitucion", "ingenieria", "administrativos", "epp"]:
-            vals = rec.get(k, []) or []
-            ordered[k] = list(dict.fromkeys(vals))  # sin duplicados, conserva orden
-        return ordered
-
-    def normas_resueltas(self, risk_id: str) -> List[str]:
-        rdef = self.risks.get(risk_id, {})
-        keys = rdef.get("normas", []) or []
-        out = []
-        for k in keys:
-            label = self.normas.get(k, k)
-            out.append(label)
-        return out
-
-    @staticmethod
-    def to_markdown_recommendations(
-        risk_name: str,
-        recs: Dict[str, List[str]],
-        normas: List[str] | None = None
-    ) -> str:
-        lines = [f"### {risk_name} — Recomendaciones"]
-        mapping = {
-            "eliminacion": "Eliminación",
-            "sustitucion": "Sustitución",
-            "ingenieria": "Controles de Ingeniería",
-            "administrativos": "Controles Administrativos",
-            "epp": "EPP"
-        }
-        for key in ["eliminacion", "sustitucion", "ingenieria", "administrativos", "epp"]:
-            items = recs.get(key, [])
-            if items:
-                lines.append(f"- **{mapping[key]}**: " + "; ".join(items))
-        if normas:
-            lines.append("- **Normas base**: " + "; ".join(normas))
-        return "\n".join(lines)
+    # Para UI: recomendaciones por ID
+    def recommendations(self, rid: str) -> Dict[str, Any]:
+        for r in self.risks:
+            if r.get("id") == rid:
+                return {"jerarquia": r.get("jerarquia", []), "normas": r.get("normas", [])}
+        return {"jerarquia": [], "normas": []}

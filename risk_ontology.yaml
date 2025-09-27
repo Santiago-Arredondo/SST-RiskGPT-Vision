@@ -1,91 +1,156 @@
-# Ontología de riesgos: escenarios normalizados + recomendaciones (jerarquía de control) + normas base
-normas:
-  decreto_1072_2015: "Decreto 1072 de 2015 - SG-SST (Colombia)"
-  res_0312_2019: "Resolución 0312 de 2019 - Estándares mínimos SG-SST"
-  iso_45001_2018: "ISO 45001:2018 - Sistemas de gestión de SST"
+# ===============================
+# SST-RiskGPT Vision — Ontología de Riesgos (LOCATIVOS, MECÁNICOS y ERGONÓMICOS)
+# Construida con normatividad colombiana (Decreto 1072/2015, Res. 2400/79, Res. 0312/19,
+# Res. 4272/21 trabajo en alturas, NTC 4994 iluminación, etc.). :contentReference[oaicite:1]{index=1}
+# Estructura:
+# - id: identificador interno
+# - nombre: título legible
+# - when_any: tokens/clases que activan el riesgo
+# - when_all: (opcional) todos deben cumplirse
+# - context: (opcional) restringe por contexto "office|industrial|obra"
+# - jerarquia: lista (eliminación → EPP)
+# - normas: lista de normas aplicables
+# ===============================
 
+meta:
+  version: 1.2
+  sources:
+    - "Decreto 1072/2015 (SG-SST)"
+    - "Resolución 2400/1979"
+    - "Resolución 0312/2019"
+    - "Resolución 4272/2021 (alturas)"
+    - "NTC 4994 (iluminación)"
+    - "NTC/ISO 12100, ISO 14120 (maquinaria)"
+    - "GTC 45, GATISO, ARL SURA/Positiva/Colmena"
+  notes: "Ontología resumida; puede ampliarse con más riesgos específicos."
+
+# -------- Contextos (se infieren con tokens) -----------
+context_tokens:
+  office:
+    any: ["laptop", "keyboard", "screen", "mouse", "chair_office", "context_office"]
+  industrial:
+    any: ["machine", "saw", "press", "conveyor", "lathe", "grinder", "machine_guard_missing", "context_industrial"]
+  obra:
+    any: ["ladder", "scaffold", "helmet", "harness", "rebar", "edge_open", "context_obra"]
+
+# -------- Riesgos LOCATIVOS ----------------------------
 riesgos:
 
-  atrapamiento_atropellamiento:
-    nombre: "Atrapamiento / Atropellamiento por equipos móviles"
-    tipo: "mecanico"
-    disparadores:
-      - all_of: [person]
-        any_of: [forklift, truck, car, excavator, bus]   # forklift requiere modelo propio
-      - any_of: [near_person_vehicle]                    # token de proximidad
-    recomendaciones:
-      eliminacion:
-        - "Separar físicamente rutas peatonales del tránsito de equipos móviles."
-      sustitucion:
-        - "Implementar equipos con detección de proximidad/frenado automático."
-      ingenieria:
-        - "Barreras físicas, demarcación de rutas y espejos en cruces."
-        - "Alarmas visuales/auditivas en intersecciones."
-      administrativos:
-        - "Plan de tráfico interno, permisos, formación y verificación pre-operacional."
-      epp:
-        - "Chaleco alta visibilidad, casco, botas con puntera."
-      normas: [decreto_1072_2015, res_0312_2019, iso_45001_2018]
-
-  contacto_partes_moviles:
-    nombre: "Contacto con partes móviles / maquinaria"
-    tipo: "mecanico"
-    disparadores:
-      - all_of: [person]
-        any_of: [conveyor, machine, saw, press]
-      - any_of: [near_person_machine, near_hand_machine]  # tokens de proximidad
-    recomendaciones:
-      eliminacion:
-        - "Bloqueo y etiquetado (LOTO) durante mantenimiento/limpieza."
-      sustitucion:
-        - "Sustituir equipos sin resguardos por alternativas seguras."
-      ingenieria:
-        - "Guardas fijas/interbloqueadas y paradas de emergencia."
-      administrativos:
-        - "Procedimientos escritos, permisos y señalización."
-      epp:
-        - "Guantes adecuados y gafas."
-      normas: [decreto_1072_2015, res_0312_2019, iso_45001_2018]
-
-  caidas_mismo_nivel_obstaculos:
+  - id: caidas_mismo_nivel_obstaculos
     nombre: "Caídas al mismo nivel por obstáculos / orden y aseo"
-    tipo: "locativo"
-    disparadores:
-      - all_of: [person]
-        any_of: [pallet, cable, spill, toolbox]
-      - any_of: [foot_near_floor_hazard]                 # token pies cerca de obstáculo
-    recomendaciones:
-      eliminacion:
-        - "Retirar obstáculos y gestionar derrames de inmediato."
-      sustitucion:
-        - "Instalar pisos antideslizantes y cubre-cables."
-      ingenieria:
-        - "Demarcación de pasillos e iluminación adecuada."
-      administrativos:
-        - "Programa 5S/orden y aseo; inspecciones de rutas."
-      epp:
-        - "Calzado antideslizante."
-      normas: [decreto_1072_2015, res_0312_2019, iso_45001_2018]
+    when_any: ["cable", "spill", "pallet", "tool_on_floor", "floor_irregular", "foot_near_floor_hazard"]
+    jerarquia:
+      - "Eliminación: retirar obstáculos y gestionar derrames de inmediato."
+      - "Sustitución: pisos antideslizantes; cubre-cables en pasillos."
+      - "Ingeniería: demarcación de rutas; barreras temporales y señalización."
+      - "Administrativos: 5S/housekeeping; inspecciones rutinarias; cierre de áreas."
+      - "EPP: calzado con suela antideslizante."
+    normas:
+      - "Res. 2400/79 (arts. 35, 176–203) — Orden, aseo y tránsito seguro."
+      - "Decreto 1072/15 — Jerarquía de controles y gestión del riesgo."
+      - "Res. 0312/19 — Estándares mínimos SG-SST."
+      - "GTC 45 — Identificación de peligros."
 
-  ergonomia_oficina:
-    nombre: "Riesgo ergonómico en oficina (posturas/visual)"
-    tipo: "ergonomico"
-    # Sinónimos compatibles con COCO: tv, laptop, keyboard, cell phone
-    disparadores:
-      - all_of: [person]
-        any_of: [chair, screen, tv, monitor, laptop, keyboard, cell phone, mouse, escritorio, desk]
-      - any_of: [office_context]  # token contexto detectado
-    recomendaciones:
-      eliminacion:
-        - "Rediseñar puesto de trabajo para postura neutra sin flexión sostenida."
-      sustitucion:
-        - "Cambiar sillas sin soporte por sillas ergonómicas regulables."
-      ingenieria:
-        - "Ajustar altura de pantalla (borde superior a la altura de los ojos)."
-        - "Apoyabrazos y soporte lumbar; reposapiés si es necesario."
-      administrativos:
-        - "Pausas activas cada 45–60 min; rotación de tareas."
-        - "Capacitación en higiene postural y micro-ajustes del puesto."
-      epp:
-        - "Muñequeras o soportes de teclado/ratón cuando aplique."
-      normas: [decreto_1072_2015, res_0312_2019, iso_45001_2018]
+  - id: caida_distinto_nivel_escalera
+    nombre: "Caída a distinto nivel (uso de escalera)"
+    when_any: ["ladder", "person_on_ladder"]
+    jerarquia:
+      - "Eliminación: usar plataforma elevada en lugar de escalera cuando sea posible."
+      - "Ingeniería: barandas/redes en altura; puntos de anclaje certificados."
+      - "Administrativos: permiso de trabajo, checklist de escalera, 3 puntos de apoyo."
+      - "EPP: arnés con línea de vida cuando aplique."
+    normas:
+      - "Res. 4272/2021 — Trabajo en alturas."
+      - "Res. 2400/79 (escuelas/uso de escaleras)."
+      - "Decreto 1072/15 — SG-SST."
+
+  - id: golpes_objetos_fijos
+    nombre: "Golpe/choque contra objetos fijos"
+    when_any: ["low_beam", "shelf_corner", "unprotected_edge", "door_swing_area"]
+    jerarquia:
+      - "Eliminación: reubicar elementos en rutas peatonales."
+      - "Ingeniería: protectores/acolchados; visores en puertas; señalización permanente."
+      - "Administrativos: demarcar pasillos; checklist locativo."
+      - "EPP: casco en áreas de impacto."
+    normas:
+      - "Res. 2400/79 — Vías y elementos fijos."
+      - "Decreto 1072/15 — Gestión de peligros."
+      - "NTC 1461/180 — Señalización."
+
+  - id: iluminacion_deficiente
+    nombre: "Iluminación deficiente / deslumbramiento"
+    when_any: ["low_light_zone", "glare_zone"]
+    jerarquia:
+      - "Sustitución/Ingeniería: nivel de lux según actividad; difusores y anti-reflejo."
+      - "Administrativos: medición periódica con luxómetro; mantenimiento."
+      - "EPP: lentes con filtro antirreflejo (si procede)."
+    normas:
+      - "NTC 4994 — Iluminación lugares de trabajo."
+      - "Res. 2400/79 (arts. 80–86)."
+      - "Decreto 1072/15."
+
+# -------- Riesgos MECÁNICOS ----------------------------
+  - id: contacto_partes_moviles
+    nombre: "Contacto con partes móviles / maquinaria"
+    when_any: ["machine", "press", "saw", "conveyor", "machine_unguarded", "near_person_machine", "near_hand_machine"]
+    context: "industrial|obra"
+    jerarquia:
+      - "Eliminación/Sustitución: automatizar; equipos con resguardos integrados."
+      - "Ingeniería: resguardos fijos/interbloqueados; parada de emergencia; LOTO en mantenimiento."
+      - "Administrativos: procedimientos de operación; capacitación; inspecciones."
+      - "EPP: protección ocular/facial y guantes según tarea."
+    normas:
+      - "Res. 2400/79 (arts. 80–91, 182–205)."
+      - "NTC/ISO 12100 e ISO 14120."
+      - "Res. 0312/19 — Estándares mínimos."
+
+  - id: atrapamiento_equipo_movil
+    nombre: "Atrapamiento / atropellamiento por equipos móviles"
+    when_any: ["forklift", "truck", "near_person_vehicle"]
+    context: "industrial|obra"
+    jerarquia:
+      - "Ingeniería: rutas segregadas peatón–vehículo; alarmas sonoras/visuales."
+      - "Administrativos: licencias/entrenamiento; límites de velocidad; mantenimiento."
+      - "EPP: chaleco reflectivo, casco y calzado de seguridad."
+    normas:
+      - "Res. 0312/19; Res. 5018/2019 (montacargas)."
+      - "NTC 1692/5254; Decreto 1072/15."
+
+  - id: proyeccion_particulas
+    nombre: "Proyección de partículas / chispas"
+    when_any: ["grinder", "cutting", "sparks"]
+    context: "industrial|obra"
+    jerarquia:
+      - "Ingeniería: guardas y pantallas; cabinas; extracción localizada."
+      - "Administrativos: verificación de discos, RPM, fijación de piezas."
+      - "EPP: gafas/careta, guantes y ropa ignífuga."
+    normas:
+      - "Res. 2400/79 (art. 194–205); NTC 2257 (ocular)."
+      - "OSHA/INSST como referencia técnica."
+
+# -------- Riesgos ERGONÓMICOS (Oficina) ---------------
+  - id: ergonomia_postura_sedentaria
+    nombre: "Ergonomía: postura sedentaria en oficina"
+    when_all: ["person", "context_office"]
+    when_any: ["posture_kyphosis", "chair_non_ergonomic", "keyboard_extended_use", "wrist_extension"]
+    context: "office"
+    jerarquia:
+      - "Eliminación/Sustitución: silla ergonómica con soporte lumbar y ajustes."
+      - "Ingeniería: altura de pantalla (borde sup. a nivel de ojos); reposapiés según %HV."
+      - "Administrativos: pausas activas cada 60–120 min; rotación de tareas."
+      - "EPP: mouse ergonómico/soportes si aplica."
+    normas:
+      - "Res. 4023/97 (PVD); Res. 2400/79 (art. 176 mobl.)."
+      - "Decreto 1072/15; Res. 0312/19; NTC 9241/5871 (ICONTEC)."
+
+  - id: ergonomia_laptop_baja
+    nombre: "Ergonomía: laptop baja (flexión cervical)"
+    when_all: ["person", "laptop", "context_office"]
+    when_any: ["screen_below_eyes"]
+    context: "office"
+    jerarquia:
+      - "Ingeniería: elevar laptop o usar base + monitor externo."
+      - "Administrativos: micro-pausas visuales (20-20-20); capacitación postural."
+    normas:
+      - "Res. 4023/97 (PVD); NTC 9241; GATISO."
+

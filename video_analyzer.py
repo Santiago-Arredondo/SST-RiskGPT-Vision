@@ -1,6 +1,7 @@
 # video_analyzer.py
-# Analiza video con YOLO, aplica fallback COCO (clases limitadas) cuando falte contexto,
-# genera tokens de proximidad y construye timeline+recomendaciones vía RiskEngine.
+# Analiza video con YOLO, genera tokens (vehículos, máquinas, obstáculos de piso)
+# + tokens de oficina/ergonomía (ligeros), inferencia via RiskEngine y recomendaciones.
+# Devuelve timeline, clases vistas, estadísticos y recomendaciones. Escribe un MP4 anotado.
 
 from __future__ import annotations
 import os
@@ -17,7 +18,9 @@ except Exception:
 from rules_engine import RiskEngine
 
 
-# ---------- utilidades de imagen ----------
+# =========================
+#   Utilidades de imagen
+# =========================
 def _ensure_color(frame: np.ndarray) -> np.ndarray:
     if frame is None:
         raise ValueError("Frame vacío (None).")
@@ -52,8 +55,30 @@ def _iou(b1, b2):
     union = a1 + a2 - inter + 1e-6
     return float(inter / union)
 
+def _draw_detections(frame: np.ndarray, dets: List[Dict[str, Any]]) -> np.ndarray:
+    img = frame.copy()
+    for d in dets:
+        x1, y1, x2, y2 = map(int, d["box"])
+        cls_name = d["cls"]
+        conf = d.get("conf", 0.0)
+        cv2.rectangle(img, (x1, y1), (x2, y2), (0, 140, 255), 2)
+        cv2.putText(img, f"{cls_name} {conf:.2f}", (x1 + 2, max(y1 - 6, 10)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 140, 255), 1, cv2.LINE_AA)
+    return img
 
-# ---------- parseos ----------
+def _draw_header(img: np.ndarray, text_lines: List[str]) -> np.ndarray:
+    out = img.copy()
+    h = 24 * (len(text_lines) + 1)
+    overlay = out.copy()
+    cv2.rectangle(overlay, (0, 0), (out.shape[1], h), (30, 30, 30), -1)
+    out = cv2.addWeighted(overlay, 0.5, out, 0.5, 0)
+    y = 20
+    for line in text_lines:
+        cv2.putText(out, line, (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.6,
+                    (255, 255, 255), 1, cv2.LINE_AA)
+        y += 24
+    return out
+
 def _parse_yolo_results(results, names: Dict[int, str]) -> List[Dict[str, Any]]:
     dets: List[Dict[str, Any]] = []
     if not results:
@@ -93,66 +118,9 @@ def _parse_pose_wrists(results_pose) -> List[Tuple[float, float]]:
     return wrists
 
 
-# ---------- mapeos / fusión ----------
-def _unify_class(name: str) -> str:
-    """Unifica clases de distintos modelos (p.ej. COCO) a vocabulario del motor de reglas."""
-    n = name.lower().strip()
-    # pantallas
-    if n in {"tv", "laptop", "monitor"}:
-        return "screen"
-    # asientos
-    if n in {"chair", "bench", "sofa"}:
-        return "chair"
-    # teléfono
-    if n in {"cell phone", "mobile", "phone"}:
-        return "phone"
-    # vehículos
-    if n in {"car", "truck", "bus"}:
-        return n  # mismas
-    # resto tal cual
-    return name
-
-def _merge_by_iou(primary: List[Dict[str, Any]], fallback: List[Dict[str, Any]], iou_thr=0.35) -> List[Dict[str, Any]]:
-    """Inserta detecciones fallback que no colisionen (IoU bajo) con las primarias."""
-    merged = list(primary)
-    for fb in fallback:
-        keep = True
-        for pr in primary:
-            if _unify_class(fb["cls"]) == _unify_class(pr["cls"]) and _iou(fb["box"], pr["box"]) > iou_thr:
-                keep = False
-                break
-        if keep:
-            merged.append(fb)
-    return merged
-
-
-# ---------- render ----------
-def _draw_detections(frame: np.ndarray, dets: List[Dict[str, Any]]) -> np.ndarray:
-    img = frame.copy()
-    for d in dets:
-        x1, y1, x2, y2 = map(int, d["box"])
-        cls_name = _unify_class(d["cls"])
-        conf = d.get("conf", 0.0)
-        cv2.rectangle(img, (x1, y1), (x2, y2), (0, 140, 255), 2)
-        cv2.putText(img, f"{cls_name} {conf:.2f}", (x1 + 2, max(y1 - 6, 10)),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 140, 255), 1, cv2.LINE_AA)
-    return img
-
-def _draw_header(img: np.ndarray, text_lines: List[str]) -> np.ndarray:
-    out = img.copy()
-    h = 24 * (len(text_lines) + 1)
-    overlay = out.copy()
-    cv2.rectangle(overlay, (0, 0), (out.shape[1], h), (30, 30, 30), -1)
-    out = cv2.addWeighted(overlay, 0.5, out, 0.5, 0)
-    y = 20
-    for line in text_lines:
-        cv2.putText(out, line, (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.6,
-                    (255, 255, 255), 1, cv2.LINE_AA)
-        y += 24
-    return out
-
-
-# ---------- tokens de proximidad ----------
+# =================================
+#   Tokens de proximidad y oficina
+# =================================
 VEHICLES = {"forklift", "truck", "car", "excavator", "bus"}
 MACHINES = {"conveyor", "machine", "saw", "press"}
 FLOOR_HAZ = {"pallet", "cable", "spill", "toolbox"}
@@ -165,27 +133,28 @@ def proximity_tokens(
     hand_thr: float = 0.10,
     iou_touch: float = 0.01,
 ) -> Set[str]:
+    """Tokens de proximidad (vehículos, máquinas, obstáculos de piso, manos)."""
     wrists = wrists or []
     toks: Set[str] = set()
 
-    persons = [d for d in dets if _unify_class(d["cls"]) == "person"]
-    vehicles = [d for d in dets if _unify_class(d["cls"]) in VEHICLES]
-    machines = [d for d in dets if _unify_class(d["cls"]) in MACHINES]
-    floor_haz = [d for d in dets if _unify_class(d["cls"]) in FLOOR_HAZ]
+    persons = [d for d in dets if d["cls"] == "person"]
+    vehicles = [d for d in dets if d["cls"] in VEHICLES]
+    machines = [d for d in dets if d["cls"] in MACHINES]
+    floor_haz = [d for d in dets if d["cls"] in FLOOR_HAZ]
 
-    # Persona cerca de vehículo (atropellamiento)
+    # A) Persona cerca de vehículo (atropellamiento)
     for p in persons:
         for v in vehicles:
             if _norm_dist_boxes(p["box"], v["box"], w, h) < near_thr or _iou(p["box"], v["box"]) > iou_touch:
                 toks.add("near_person_vehicle")
 
-    # Persona cerca de máquina (contacto con partes móviles)
+    # B) Persona cerca de máquina (contacto con partes móviles)
     for p in persons:
         for m in machines:
             if _norm_dist_boxes(p["box"], m["box"], w, h) < near_thr or _iou(p["box"], m["box"]) > iou_touch:
                 toks.add("near_person_machine")
 
-    # Muñecas cerca de máquina (si hay pose)
+    # C) Muñecas cerca de máquina (si hay pose)
     for (wx, wy) in wrists:
         for m in machines:
             x1, y1, x2, y2 = m["box"]
@@ -196,7 +165,7 @@ def proximity_tokens(
                 if d < hand_thr:
                     toks.add("near_hand_machine")
 
-    # Pies/persona cerca de obstáculo en piso (caídas mismo nivel)
+    # D) Pies/persona cerca de obstáculo en piso (caídas)
     for p in persons:
         px1, py1, px2, py2 = p["box"]
         feet_y = py2
@@ -209,54 +178,68 @@ def proximity_tokens(
 
     return toks
 
-
-# ---------- analizador principal ----------
-FALLBACK_ALLOWED = {
-    # oficina / locativos ligeros
-    "laptop", "monitor", "tv", "keyboard", "chair", "cell phone",
-    # vía / yardas
-    "car", "truck", "bus",
+# ---- Parche de oficina / ergonomía (ligero) ----
+OFFICE_HINT_CLASSES = {
+    "chair", "couch", "bench",
+    "laptop", "screen", "tv", "monitor",
+    "keyboard", "mouse", "cell phone", "cell_phone", "phone",
+    "book", "backpack", "table", "desk"
 }
 
+def office_tokens_from_dets(dets: List[Dict[str, Any]], w: int, h: int) -> Set[str]:
+    toks = set()
+    classes = {d["cls"] for d in dets}
+    office_hints = classes & OFFICE_HINT_CLASSES
+
+    if "person" in classes and len(office_hints) >= 2:
+        toks.add("context_office")
+
+    seated_possible = bool({"chair", "couch", "bench"} & classes)
+    screen_like = bool({"laptop", "screen", "tv", "monitor"} & classes)
+    if "person" in classes and seated_possible and screen_like:
+        toks.add("office_posture_possible")
+
+    if "laptop" in classes and "person" in classes:
+        toks.add("office_laptop_present")
+
+    return toks
+
+
+# ===========
+#   Principal
+# ===========
 def analyze_video(
     video_path: str,
     out_path: str,
     model_path: Optional[str] = None,
     stride: int = 5,
     risk_sustain: int = 6,
-    conf: float = 0.35,
+    conf: float = 0.25,
     iou: float = 0.6,
-    imgsz: int = 640,
+    imgsz: int = 960,
     use_pose: bool = False,
     pose_model_path: str = "yolov8n-pose.pt",
     near_thr: float = 0.20,
     hand_thr: float = 0.10,
     iou_touch: float = 0.01,
-    fallback_model: str = "yolov8n.pt",
 ) -> Dict[str, Any]:
-    """
-    Procesa un video, escribe un MP4 anotado y devuelve:
-      - timeline: lista de segmentos con riesgo activo
-      - classes_present: clases únicas vistas (unificadas)
-      - risk_stats: eventos y duración por riesgo
-      - recommendations: recomendaciones por riesgo (desde RiskEngine)
-      - risk_names: etiquetas legibles por riesgo
-    """
     if not YOLO_OK:
         raise RuntimeError("Ultralytics/YOLO no está disponible. Instala 'ultralytics'.")
 
-    # Modelo de detección principal
+    # Modelo de detección
     if not model_path or not os.path.exists(model_path):
         default_best = os.path.join("models", "best.pt")
         model_path = default_best if os.path.exists(default_best) else "yolov8n.pt"
     model = YOLO(model_path)
-    names_main = getattr(model, "names", {i: str(i) for i in range(1000)})
+    names = model.names if hasattr(model, "names") else {i: str(i) for i in range(1000)}
 
     # Modelo de pose (opcional)
-    pose_model = YOLO(pose_model_path) if use_pose else None
-
-    # Fallback COCO (carga on-demand la primera vez que lo necesitemos)
-    fallback_yolo = None
+    pose_model = None
+    if use_pose:
+        try:
+            pose_model = YOLO(pose_model_path)
+        except Exception:
+            pose_model = None
 
     engine = RiskEngine("risk_ontology.yaml")
 
@@ -290,52 +273,35 @@ def analyze_video(
             break
         frame = _ensure_color(frame)
 
-        # ¿procesar este frame?
         run_now = (frame_idx % max(1, stride) == 0)
 
         if run_now:
-            # detección principal
-            res = model.predict(source=frame, conf=conf, iou=iou, imgsz=imgsz, verbose=False, device="cpu")
-            dets = _parse_yolo_results(res, names_main)
-
-            # ¿Hace falta contexto? (pocas clases útiles)
-            unified = {_unify_class(d["cls"]) for d in dets}
-            needs_fb = len(unified.intersection({"person", "cable", "pallet", "spill", "machine", "truck", "forklift", "chair", "screen"})) < 2
-
-            if needs_fb:
-                if fallback_yolo is None:
-                    fallback_yolo = YOLO(fallback_model)
-                    fb_names = getattr(fallback_yolo, "names", {})
-                    # ids de clases permitidas
-                    allowed_ids = {i for i, n in fb_names.items() if n in FALLBACK_ALLOWED}
-                # inferencia fallback (rápida)
-                fb_res = fallback_yolo.predict(source=frame, conf=max(0.25, conf*0.9), iou=0.6, imgsz=min(640, imgsz), verbose=False, device="cpu")
-                fb_dets = _parse_yolo_results(fb_res, fallback_yolo.names)
-                # filtra por allowlist
-                fb_dets = [d for d in fb_dets if fallback_yolo.names and fallback_yolo.names.get(
-                    list(fallback_yolo.names.keys())[list(fallback_yolo.names.values()).index(d["cls"])]
-                ) if _unify_class(d["cls"]) in {"screen", "chair", "phone", "car", "truck", "bus"}] if hasattr(fallback_yolo, "names") else fb_dets
-                # fusión por IoU
-                dets = _merge_by_iou(dets, fb_dets, iou_thr=0.35)
+            results = model.predict(source=frame, conf=conf, iou=iou, imgsz=imgsz, verbose=False, device="cpu")
+            dets = _parse_yolo_results(results, names)
+            last_dets = dets
 
             # Pose (muñecas)
             wrists: List[Tuple[float, float]] = []
             if pose_model is not None:
                 try:
-                    res_pose = pose_model.predict(source=frame, imgsz=imgsz, verbose=False, device="cpu")
-                    wrists = _parse_pose_wrists(res_pose)
+                    results_pose = pose_model.predict(source=frame, imgsz=imgsz, verbose=False, device="cpu")
+                    wrists = _parse_pose_wrists(results_pose)
                 except Exception:
                     wrists = []
-
-            last_dets, last_wrists = dets, wrists
+            last_wrists = wrists
         else:
-            dets, wrists = last_dets, last_wrists
+            dets = last_dets
+            wrists = last_wrists  # <- asegurado
 
-        present = sorted({_unify_class(d["cls"]) for d in dets})
+        # Clases y tokens
+        present = sorted({d["cls"] for d in dets})
         classes_seen.update(present)
 
         toks = proximity_tokens(dets, w, h, wrists=wrists, near_thr=near_thr, hand_thr=hand_thr, iou_touch=iou_touch)
-        present_with_ctx = sorted(set(present).union(toks))
+        toks_office = office_tokens_from_dets(dets, w, h)
+        toks = set(toks) | set(toks_office)
+
+        present_with_ctx = sorted(set(present) | toks)
 
         # Inferencia de riesgos
         risks = engine.infer(present_with_ctx)
@@ -349,7 +315,6 @@ def analyze_video(
                 risk_names[rid] = r.get("nombre", rid)
             counters[rid] = risk_sustain
 
-        # decaimiento de riesgos no presentes
         for rid in list(counters.keys()):
             if rid not in current_rids:
                 counters[rid] -= 1
@@ -362,11 +327,9 @@ def analyze_video(
         active_set = set(active)
         opened_set = set(opened.keys())
 
-        # abrir nuevos
         for rid in active_set - opened_set:
             opened[rid] = frame_idx
 
-        # cerrar los que dejaron de estar activos
         for rid in opened_set - active_set:
             start_f = opened.pop(rid)
             end_f = max(frame_idx - 1, start_f)
@@ -379,7 +342,7 @@ def analyze_video(
                 "end_sec": round(end_f / fps, 3),
             })
 
-        # render
+        # Render
         img_det = _draw_detections(frame, dets)
         info = f"Frame {frame_idx+1}/{total} | t={frame_idx/fps:.2f}s"
         risks_line = "Riesgos activos: " + (", ".join([risk_names.get(r, r) for r in active]) if active else "Ninguno")
@@ -388,7 +351,7 @@ def analyze_video(
 
         frame_idx += 1
 
-    # cerrar segmentos abiertos al final
+    # cerrar segmentos abiertos
     for rid, start_f in opened.items():
         timeline.append({
             "risk": rid,
@@ -415,6 +378,7 @@ def analyze_video(
         acc["duration_sec"] = round(acc["duration_frames"] / fps, 3)
 
     unique_risks = sorted(risk_stats.keys())
+    engine = RiskEngine("risk_ontology.yaml")
     recommendations = {rid: engine.recommendations(rid) for rid in unique_risks}
 
     return {
@@ -427,7 +391,7 @@ def analyze_video(
 
 
 if __name__ == "__main__":
-    # Prueba CLI
+    # Prueba CLI (opcional)
     import argparse, tempfile
     ap = argparse.ArgumentParser()
     ap.add_argument("--video", required=True)
@@ -438,9 +402,9 @@ if __name__ == "__main__":
     ap.add_argument("--use_pose", action="store_true")
     ap.add_argument("--near_thr", type=float, default=0.20)
     ap.add_argument("--hand_thr", type=float, default=0.10)
-    ap.add_argument("--conf", type=float, default=0.35)
+    ap.add_argument("--conf", type=float, default=0.25)
     ap.add_argument("--iou", type=float, default=0.60)
-    ap.add_argument("--imgsz", type=int, default=640)
+    ap.add_argument("--imgsz", type=int, default=960)
     args = ap.parse_args()
     res = analyze_video(
         args.video, args.out, model_path=args.model, stride=args.stride,
