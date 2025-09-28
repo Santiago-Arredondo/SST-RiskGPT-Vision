@@ -1,150 +1,116 @@
-# Envoltura de YOLO para inferencia en imágenes con parámetros configurables.
-
+# detector.py
 from __future__ import annotations
 import os
-import tempfile
-from typing import Any, Dict, List, Optional, Union
-
+from typing import Any, Dict, List, Optional
 import numpy as np
-from PIL import Image
 
 try:
     from ultralytics import YOLO
-    YOLO_AVAILABLE = True
+    YOLO_OK = True
 except Exception:
-    YOLO_AVAILABLE = False
+    YOLO_OK = False
 
+
+OPEN_VOCAB_PROMPTS = [
+    # Clases útiles en obra/altura (open-vocabulary)
+    "ladder", "scaffold", "rebar", "roof", "edge", "harness", "safety harness",
+    "guardrail", "platform", "crane hook", "toolbox", "spill", "cable"
+]
 
 class YoloDetector:
     """
-    Carga un modelo YOLO y permite predecir sobre rutas de imagen, PIL.Image o numpy arrays.
-    Acepta conf, iou e imgsz desde __init__ para que la UI pueda ajustarlos.
+    Pequeño wrapper para Ultralytics YOLO / YOLO-World.
+    - Soporta pesos 'clásicos' (COCO) y 'world' (open-vocabulary).
+    - Normaliza nombres de clase.
     """
-
-    def __init__(
-        self,
-        model_path: Optional[str] = None,
-        conf: float = 0.25,
-        iou: float = 0.60,
-        imgsz: int = 960,
-        device: str = "cpu",
-    ):
-        if not YOLO_AVAILABLE:
-            raise RuntimeError("Ultralytics/YOLO no está disponible. Instala 'ultralytics'.")
-
-        # Resolución del modelo por defecto: models/best.pt -> yolov8n.pt
-        resolved = None
-        if model_path and os.path.exists(model_path):
-            resolved = model_path
-        else:
-            best_local = os.path.join("models", "best.pt")
-            resolved = best_local if os.path.exists(best_local) else "yolov8n.pt"
-
-        self.model_path = resolved
+    def __init__(self, model_path: Optional[str] = None):
+        if not YOLO_OK:
+            raise RuntimeError("Ultralytics no instalado. pip install ultralytics")
+        # Selección automática si no se entrega ruta
+        self.model_path = model_path or self._auto_model()
+        if not os.path.exists(self.model_path):
+            raise FileNotFoundError(f"No existe el modelo: {self.model_path}")
         self.model = YOLO(self.model_path)
-        self.names = self.model.names if hasattr(self.model, "names") else {}
-        self.conf = float(conf)
-        self.iou = float(iou)
-        self.imgsz = int(imgsz)
-        self.device = device
 
-    # -------------------- helpers --------------------
+        # ¿Es un modelo YOLO-World?
+        self.is_world = ("world" in os.path.basename(self.model_path).lower())
 
-    @staticmethod
-    def _pil_to_rgb_array(img: Image.Image) -> np.ndarray:
-        """Convierte PIL -> numpy RGB uint8 HxWxC."""
-        if img.mode != "RGB":
-            img = img.convert("RGB")
-        return np.asarray(img)
-
-    @staticmethod
-    def _ensure_hwc_uint8(arr: np.ndarray) -> np.ndarray:
-        """Asegura HxWxC y dtype uint8 para YOLO."""
-        if arr is None:
-            raise ValueError("Imagen vacía.")
-        if arr.ndim == 2:
-            arr = np.stack([arr, arr, arr], axis=-1)
-        if arr.ndim != 3 or arr.shape[2] not in (3, 4):
-            raise ValueError(f"Array con forma no válida para imagen: {arr.shape}")
-        if arr.shape[2] == 4:
-            # RGBA -> RGB
-            arr = arr[:, :, :3]
-        if arr.dtype != np.uint8:
-            arr = arr.astype(np.uint8)
-        return arr
-
-    # -------------------- API pública --------------------
-
-    def predict(self, source: Union[str, Image.Image, np.ndarray]):
-        """
-        Devuelve la lista de Results de Ultralytics para 1 imagen.
-        Acepta ruta, PIL.Image o numpy array HxWxC.
-        Para mayor compatibilidad, si es PIL o array, escribimos un temporal.
-        """
-        if isinstance(source, str):
-            src = source
-            write_temp = False
-            tmp_path = None
-        elif isinstance(source, Image.Image):
-            arr = self._ensure_hwc_uint8(self._pil_to_rgb_array(source))
-            # Ultralytics acepta arrays, pero para evitar rarezas, guardamos temporal.
-            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg")
-            Image.fromarray(arr).save(tmp.name, format="JPEG", quality=95)
-            src = tmp.name
-            write_temp = True
-            tmp_path = tmp.name
-            tmp.close()
-        elif isinstance(source, np.ndarray):
-            arr = self._ensure_hwc_uint8(source)
-            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg")
-            Image.fromarray(arr).save(tmp.name, format="JPEG", quality=95)
-            src = tmp.name
-            write_temp = True
-            tmp_path = tmp.name
-            tmp.close()
-        else:
-            raise TypeError(f"Tipo de fuente no soportado: {type(source)}")
-
+        # Clases de nombres para mapping posteriormente
+        self.names = None
         try:
-            results = self.model.predict(
-                source=src,
-                conf=self.conf,
-                iou=self.iou,
-                imgsz=self.imgsz,
-                device=self.device,
-                verbose=False,
-            )
-            return results
-        finally:
-            if 'write_temp' in locals() and write_temp and tmp_path and os.path.exists(tmp_path):
-                try:
-                    os.remove(tmp_path)
-                except Exception:
-                    pass
+            self.names = self.model.names
+        except Exception:
+            self.names = None
 
-    def to_dicts(self, results) -> List[Dict[str, Any]]:
+    @staticmethod
+    def _auto_model() -> str:
+        # Preferencias: tu best entrenado, luego v8m, luego v8n
+        for p in ["models/best.pt", "models/yolov8m.pt", "yolov8m.pt", "yolov8n.pt"]:
+            if os.path.exists(p):
+                return p
+        # Última carta: que Ultralytics lo resuelva (puede descargar)
+        return "yolov8m.pt"
+
+    def predict(
+        self,
+        image_or_path: Any,
+        conf: float = 0.25,
+        iou: float = 0.6,
+        imgsz: int = 640,
+        device: str = "cpu",
+        classes_prompt: Optional[List[str]] = None,
+    ) -> List[Dict[str, Any]]:
         """
-        Convierte Results de Ultralytics (para 1 imagen) en una lista de dicts:
-        [{"cls": "person", "conf": 0.87, "box": [x1,y1,x2,y2]}, ...]
+        Devuelve lista de dicts con: {'cls': str, 'conf': float, 'box': [x1,y1,x2,y2]}
         """
+        if self.is_world:
+            # YOLO-World: define clases “abiertas”
+            prompts = classes_prompt or OPEN_VOCAB_PROMPTS
+            try:
+                # Algunos builds usan set_classes, otros model.set_classes
+                if hasattr(self.model, "set_classes"):
+                    self.model.set_classes(prompts)
+                else:
+                    self.model.set_classes = prompts  # fallback silencioso
+            except Exception:
+                pass
+
+        results = self.model.predict(
+            source=image_or_path, imgsz=imgsz, conf=conf, iou=iou, device=device, verbose=False
+        )
         dets: List[Dict[str, Any]] = []
         if not results:
             return dets
-        r = results[0]  # una sola imagen
+        r = results[0]
         if not hasattr(r, "boxes") or r.boxes is None:
             return dets
         boxes = r.boxes
+
+        # names puede venir del modelo o del resultado
+        names = self.names or getattr(r, "names", None) or {}
+
         for i in range(len(boxes)):
-            cls_raw = boxes.cls[i]
-            conf_raw = boxes.conf[i]
-            cls_id = int(getattr(cls_raw, "item", lambda: cls_raw)())
-            conf = float(getattr(conf_raw, "item", lambda: conf_raw)())
-            x1, y1, x2, y2 = boxes.xyxy[i].tolist()
-            cname = self.names.get(cls_id, str(cls_id))
-            dets.append({"cls": cname, "conf": conf, "box": [float(x1), float(y1), float(x2), float(y2)]})
+            cls_id = int(boxes.cls[i].item())
+            conf_i = float(boxes.conf[i].item())
+            x1, y1, x2, y2 = [float(v) for v in boxes.xyxy[i].tolist()]
+            raw = names.get(cls_id, str(cls_id)) if isinstance(names, dict) else str(cls_id)
+            norm = self._normalize_name(raw)
+            dets.append({"cls": norm, "conf": conf_i, "box": [x1, y1, x2, y2], "raw": raw})
         return dets
 
     @staticmethod
-    def classes_from_dicts(dets: List[Dict[str, Any]]) -> List[str]:
-        """Clases únicas presentes en los detections."""
-        return sorted({d["cls"] for d in dets})
+    def _normalize_name(name: str) -> str:
+        n = name.lower().strip()
+        # Normaliza variantes comunes
+        mapping = {
+            "tv": "screen", "monitor": "screen", "laptop": "laptop", "keyboard": "keyboard",
+            "cell phone": "phone", "mobile": "phone", "smartphone": "phone",
+            "chair": "chair", "person": "person", "backpack": "backpack",
+            "truck": "truck", "car": "car", "bus": "bus", "motorcycle": "motorcycle",
+            # open-vocab típicos:
+            "ladder": "ladder", "scaffold": "scaffold", "rebar": "rebar", "roof": "roof",
+            "edge": "edge", "harness": "harness", "safety harness": "harness",
+            "guardrail": "guardrail", "platform": "platform", "toolbox": "toolbox",
+            "spill": "spill", "cable": "cable"
+        }
+        return mapping.get(n, n)
