@@ -1,1 +1,0 @@
-# SST-RiskGPT-Vision

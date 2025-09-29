@@ -1,360 +1,225 @@
-# SST-RiskGPT Vision — Ontología Expandida de Riesgos
-# Basada en normatividad colombiana completa del documento
-# Version: 2.0
-
+# ===============================
+# Ontología de Riesgos SST - Colombia (v0.4)
+# ===============================
 meta:
-  version: 2.0
-  sources:
-    - "Decreto 1072/2015 (SG-SST)"
-    - "Resolución 2400/1979"
-    - "Resolución 0312/2019" 
-    - "Resolución 4272/2021 (alturas)"
-    - "Resolución 4023/1997 (PVD)"
-    - "NTC 4994 (iluminación)"
-    - "NTC/ISO 12100, ISO 14120 (maquinaria)"
-    - "GTC 45, GATISO"
+  version: "0.4"
+  lang: "es"
+  notes: |
+    - Priorizamos LOCATIVOS y MECÁNICOS; ERGONÓMICOS como extra.
+    - Tokens pueden venir del detector (YOLO) o de heurísticas (edge_open, ladder, ladder_like, person_on_ladder)
+      y de pose (sitting_posture, etc. via MediaPipe).
+    - Las recomendaciones siguen la jerarquía de control.
 
-# -------- Contextos expandidos -----------
-context_tokens:
-  office:
-    any: ["laptop", "keyboard", "screen", "mouse", "chair_office", "desk", "monitor", "computer", "context_office"]
-  industrial:
-    any: ["machine", "saw", "press", "conveyor", "lathe", "grinder", "forklift", "crane", "welder", "context_industrial"]
-  obra:
-    any: ["ladder", "scaffold", "helmet", "harness", "rebar", "edge_open", "excavator", "context_obra"]
+# -------------------------------
+# Contextos (se activan con tokens característicos)
+# -------------------------------
+contexts:
+  construction:
+    any: ["scaffold", "ladder", "ladder_like", "rebar", "edge_open"]
   warehouse:
-    any: ["shelf", "pallet", "forklift", "box", "rack", "context_warehouse"]
+    any: ["pallet", "rack", "forklift", "ladder"]
+  industrial:
+    any: ["machine", "press", "gear", "grinder", "saw", "ladder"]
+  office:
+    any: ["desk", "chair", "screen", "laptop", "ladder"]
 
-# -------- RIESGOS LOCATIVOS ----------------------------
-riesgos:
-
-  # Caídas mismo nivel
-  - id: caidas_mismo_nivel_obstaculos
-    nombre: "Caídas al mismo nivel por obstáculos"
+# -------------------------------
+# Riesgos
+# -------------------------------
+risks:
+  # ======================
+  # LOCATIVOS
+  # ======================
+  loc_caida_mismo_nivel:
     tipo: "LOCATIVO"
-    when_any: ["cable", "spill", "pallet", "tool_on_floor", "floor_irregular", "foot_near_floor_hazard", "wet_floor", "debris"]
-    jerarquia:
-      eliminacion: ["Retirar obstáculos permanentemente", "Rediseñar rutas sin cruces"]
-      sustitucion: ["Pisos antideslizantes", "Cubrecables empotrados"]
-      ingenieria: ["Demarcación fotoluminiscente", "Barreras físicas", "Drenajes en zonas húmedas"]
-      administrativos: ["Programa 5S", "Inspecciones cada 2h", "Protocolo derrames"]
-      epp: ["Calzado antideslizante certificado"]
-    normativas:
-      - "Res. 2400/79 Art. 35, 176-203"
-      - "Decreto 1072/15 Art. 2.2.4.6.24"
-      - "GTC 45"
+    nombre: "Caída al mismo nivel (obstáculos/derrame)"
+    descripcion: "Riesgo de resbalón o tropiezo por piso mojado, cables u objetos en el paso."
+    context: ["office", "warehouse", "industrial", "construction"]
+    if_any: ["wet_floor", "spill", "cable", "debris", "hole", "floor_irregular", "foot_near_obstacle"]
+    if_all: ["person"]
+    severidad: "ALTA"
+    normativa:
+      - "Decreto 1072/2015 – Identificación/Control de peligros (SG-SST)."
+      - "Resolución 2400/1979 – Condiciones locativas: pisos y vías."
+      - "Resolución 0312/2019 – Estándares mínimos: inspecciones locativas."
+    controles:
+      Eliminación:
+        - "Retirar de inmediato el obstáculo y limpiar el derrame."
+      Ingeniería:
+        - "Instalar pisos antideslizantes, canaletas o alfombras de absorción."
+      Administrativos:
+        - "Señalizar temporalmente ('Piso Mojado') y aplicar rutinas 5S."
+      EPP:
+        - "Calzado con suela antideslizante."
 
-  - id: caidas_mismo_nivel_liquidos
-    nombre: "Caídas por superficies mojadas/resbalosas"
+  loc_caida_altura_borde_abierto:
     tipo: "LOCATIVO"
-    when_any: ["wet_floor", "spill", "puddle", "oil_spill"]
-    when_all: ["person"]
-    jerarquia:
-      eliminacion: ["Eliminar fuentes de líquidos"]
-      sustitucion: ["Pisos con coeficiente fricción >0.5"]
-      ingenieria: ["Drenajes", "Extractores de humedad"]
-      administrativos: ["Señalización inmediata", "Kit antiderrames"]
-      epp: ["Calzado con suela de goma"]
-    normativas:
-      - "Res. 2400/79 Art. 35"
-      - "NTC 1461 (señalización)"
+    nombre: "Caída de altura por borde sin protección"
+    descripcion: "Persona cerca de borde de losa/estructura sin barandas/rodapié o protección colectiva."
+    context: ["construction"]
+    if_any: ["edge_open", "person_on_edge"]
+    if_all: []
+    severidad: "CRITICA"
+    normativa:
+      - "Decreto 1072/2015 – Jerarquía de controles (eliminación > ingeniería > administrativos > EPP)."
+      - "Resolución 2400/1979 – Protección perimetral en bordes y aberturas."
+      - "Lineamientos de trabajo en alturas – protecciones colectivas y sistemas de detención."
+    controles:
+      Eliminación:
+        - "Restringir acceso hasta instalar protección colectiva."
+      Ingeniería:
+        - "Barandas (>1 m), rodapié, redes de seguridad y líneas de vida."
+      Administrativos:
+        - "Permisos de trabajo en alturas y supervisor autorizado."
+      EPP:
+        - "Arnés con doble eslinga y punto de anclaje certificado."
 
-  # Caídas distinto nivel
-  - id: caida_distinto_nivel_escalera
+  loc_caida_desde_escalera:
+    tipo: "LOCATIVO"
     nombre: "Caída desde escalera"
+    descripcion: "Uso de escalera portátil con persona sobre peldaños sin estabilización o sin tres puntos de apoyo."
+    context: ["construction", "industrial", "warehouse", "office"]
+    if_any: ["person_on_ladder", "ladder", "ladder_like", "ladder_unstable"]
+    if_all: [""]   # <--- NO exijas 'ladder' aquí
+    severidad: "ALTA"
+    normativa:
+      - "Resolución 2400/1979 – Escaleras: condiciones y uso."
+      - "Estándares de trabajo en alturas – inspección y uso seguro de escaleras."
+    controles:
+      Ingeniería:
+        - "Escalera con zapatas antideslizantes y amarre/estabilizador."
+      Administrativos:
+        - "Mantener tres puntos de apoyo; no usar el último peldaño; ubicar en ángulo correcto."
+      EPP:
+        - "Calzado antideslizante; si aplica, línea de vida/arnés."
+
+
+  loc_golpe_contra_objeto_fijo:
     tipo: "LOCATIVO"
-    when_any: ["ladder", "person_on_ladder", "stepladder"]
-    jerarquia:
-      eliminacion: ["Usar plataforma elevadora certificada"]
-      sustitucion: ["Escalera tipo avión con barandas"]
-      ingenieria: ["Puntos de anclaje certificados", "Líneas de vida verticales"]
-      administrativos: ["Permiso trabajo alturas", "Inspección pre-uso", "Regla 3 puntos apoyo"]
-      epp: ["Arnés con eslinga en Y", "Casco con barbuquejo"]
-    normativas:
-      - "Res. 4272/2021 (completa)"
-      - "Res. 2400/79 Art. 115-118"
-  # - id: caida_altura
-  #   nombre: "Caída de altura (obra / borde / andamio)"
-  #   cuando:
-  #     - cualquiera: ["height_context", "edge", "scaffold", "roof", "platform"]
+    nombre: "Golpe contra objeto fijo"
+    descripcion: "Impacto con estanterías, bordes o mobiliario mal ubicado en zonas de tránsito."
+    context: ["warehouse", "industrial", "office"]
+    if_any: ["rack", "shelf", "low_beam", "edge_open"]
+    if_all: ["person"]
+    severidad: "MEDIA"
+    normativa:
+      - "Resolución 2400/1979 – Orden/aseo y señalización."
+      - "GTC 45 – Identificación y valoración de peligros."
+    controles:
+      Eliminación:
+        - "Reubicar o retirar elementos en la ruta peatonal."
+      Ingeniería:
+        - "Proteger aristas con cantoneras y señalizar vigas bajas."
+      Administrativos:
+        - "Demarcar pasillos y realizar inspecciones semanales."
 
-  - id: caida_borde_desprotegido
-    nombre: "Caída por borde sin protección"
+  loc_iluminacion_deficiente:
     tipo: "LOCATIVO"
-    when_any: ["edge_exposure", "leading_edge", "unprotected_edge"]
-    context: "obra"
-    jerarquia:
-      eliminacion: ["Cerrar aberturas permanentemente"]
-      ingenieria: ["Barandas 1.0m con rodapié", "Redes de seguridad", "Cubiertas resistentes"]
-      administrativos: ["Delimitación 2m del borde", "Supervisor alturas presente"]
-      epp: ["Arnés anclado 100% del tiempo"]
-    normativas:
-      - "Res. 4272/2021 Art. 15-18"
-      - "Res. 2400/79 Art. 50"
+    nombre: "Iluminación deficiente"
+    descripcion: "Bajos niveles de lux o deslumbramientos que afectan la visibilidad."
+    context: ["office", "warehouse", "industrial"]
+    if_any: ["dark_area", "glare_source"]
+    severidad: "MEDIA"
+    normativa:
+      - "NTC 4994 – Iluminación en lugares de trabajo (oficinas 300–500 lux)."
+      - "Resolución 2400/1979 – Condiciones de iluminación."
+    controles:
+      Ingeniería:
+        - "Mejorar luminarias y evitar deslumbramientos con difusores."
+      Administrativos:
+        - "Medir lux periódicamente y plan de mantenimiento de luminarias."
 
-  # Golpes y choques
-  - id: golpes_objetos_fijos
-    nombre: "Golpe contra objetos fijos"
-    tipo: "LOCATIVO"
-    when_any: ["low_beam", "shelf_corner", "unprotected_edge", "door_swing", "protruding_object"]
-    jerarquia:
-      eliminacion: ["Reubicar elementos fuera de rutas"]
-      ingenieria: ["Protectores acolchados", "Espejos convexos", "Aumentar altura libre a 2.1m"]
-      administrativos: ["Velocidad máx 10km/h", "Rutas demarcadas"]
-      epp: ["Casco clase C"]
-    normativas:
-      - "Res. 2400/79 Art. 28-50"
-      - "NTC 1461"
-
-  - id: desprendimiento_objetos
-    nombre: "Caída de objetos desde altura"
-    tipo: "LOCATIVO"
-    when_any: ["unstable_load", "shelf_overload", "falling_object", "loose_material"]
-    jerarquia:
-      eliminacion: ["Almacenamiento a nivel de piso"]
-      sustitucion: ["Estanterías certificadas con anclaje"]
-      ingenieria: ["Mallas de retención", "Topes frontales", "Rodapiés 15cm"]
-      administrativos: ["Carga máx visible", "FIFO", "Inspección semanal"]
-      epp: ["Casco con absorción impactos"]
-    normativas:
-      - "Res. 2400/79 Art. 206"
-      - "NTC 5227"
-
-  # Iluminación
-  - id: iluminacion_deficiente
-    nombre: "Iluminación inadecuada"
-    tipo: "LOCATIVO"
-    when_any: ["low_light", "dark_area", "glare_zone", "shadow_area"]
-    jerarquia:
-      eliminacion: ["Aumentar luz natural con ventanas"]
-      sustitucion: ["LED 5000K con IRC>80"]
-      ingenieria: ["Luxes según NTC 4994", "Difusores antiglare"]
-      administrativos: ["Medición luxómetro mensual", "Limpieza luminarias"]
-      epp: ["Lentes fotocromáticos"]
-    normativas:
-      - "NTC 4994 (tabla luxes)"
-      - "Res. 2400/79 Art. 80-86"
-
-  # Superficies defectuosas
-  - id: superficies_mal_estado
-    nombre: "Pisos y escaleras deteriorados"
-    tipo: "LOCATIVO"
-    when_any: ["broken_floor", "loose_tile", "damaged_stairs", "pothole", "uneven_surface"]
-    jerarquia:
-      eliminacion: ["Reconstrucción completa"]
-      sustitucion: ["Materiales antideslizantes R10-R12"]
-      ingenieria: ["Nivelación", "Cintas antideslizantes", "Pasamanos dobles"]
-      administrativos: ["Reporte inmediato", "Cierre temporal área"]
-      epp: ["Calzado con suela de seguridad"]
-    normativas:
-      - "Res. 2400/79 Art. 80-81"
-      - "NTC 4142"
-
-# -------- RIESGOS MECÁNICOS ----------------------------
-
-  # Atrapamientos
-  - id: atrapamiento_partes_moviles
+  # ======================
+  # MECÁNICOS
+  # ======================
+  mec_atrapamiento_partes_moviles:
+    tipo: "MECÁNICO"
     nombre: "Atrapamiento en partes móviles"
-    tipo: "MECÁNICO"
-    when_any: ["exposed_gears", "belt_drive", "roller", "rotating_shaft", "pulley"]
-    when_all: ["person"]
-    jerarquia:
-      eliminacion: ["Automatización completa"]
-      sustitucion: ["Transmisión hidráulica cerrada"]
-      ingenieria: ["Guardas fijas certificadas", "Interbloqueos tipo 4", "Luz cortina"]
-      administrativos: ["LOTO obligatorio", "Distancia mín 1m", "Ropa ajustada"]
-      epp: ["Manga corta o ajustada", "Sin joyas"]
-    normativas:
-      - "Res. 2400/79 Art. 182-184"
-      - "NTC ISO 14120:2018"
-      - "ISO 13849-1"
+    descripcion: "Puntos de atrapamiento cerca de engranajes, correas o rodillos sin guarda."
+    context: ["industrial", "warehouse"]
+    if_any: ["exposed_gears", "moving_part", "guard_missing"]
+    if_all: ["machine"]
+    severidad: "CRITICA"
+    normativa:
+      - "Resolución 2400/1979 – Resguardos en partes móviles."
+      - "Decreto 1072/2015 – Control de peligros (Jerarquía)."
+      - "ISO/NTC 14120 – Guardas para maquinaria."
+    controles:
+      Eliminación:
+        - "Sustituir equipos sin resguardos por máquinas con protección integrada."
+      Ingeniería:
+        - "Instalar resguardos fijos/interbloqueados y paro de emergencia."
+      Administrativos:
+        - "Procedimientos seguros y LOTO en mantenimiento."
+      EPP:
+        - "Ropa ajustada y protección visual según tarea."
 
-  - id: atrapamiento_vehicular
-    nombre: "Atropellamiento por vehículos"
+  mec_golpe_vehiculo_montacargas:
     tipo: "MECÁNICO"
-    when_any: ["near_person_vehicle", "forklift", "truck", "vehicle_reverse"]
-    jerarquia:
-      eliminacion: ["Segregación total peatón-vehículo"]
-      ingenieria: ["Barreras físicas", "Espejos panorámicos", "Sensor proximidad"]
-      administrativos: ["Velocidad 5km/h", "Bocina en reversa", "Vigía obligatorio"]
-      epp: ["Chaleco alta visibilidad clase 2"]
-    normativas:
-      - "Res. 5018/2019 (montacargas)"
-      - "NTC 1692"
+    nombre: "Golpe por vehículo industrial"
+    descripcion: "Interacción peligrosa entre peatón y montacargas/vehículos."
+    context: ["warehouse", "industrial"]
+    if_any: ["forklift_moving", "vehicle_moving", "person_near_vehicle"]
+    if_all: ["person"]
+    severidad: "CRITICA"
+    normativa:
+      - "Resolución 2400/1979 – Tránsito interno y segregación de rutas."
+      - "Resolución 0312/2019 – Capacitación y procedimientos."
+    controles:
+      Ingeniería:
+        - "Rutas segregadas, alarmas acústicas/luminosas, espejos cóncavos."
+      Administrativos:
+        - "Velocidades máximas y certificación de operadores."
+      EPP:
+        - "Chaleco reflectivo en zonas de tráfico."
 
-  # Cortes
-  - id: cortes_herramientas
-    nombre: "Cortes por herramientas"
+  mec_proyeccion_particulas:
     tipo: "MECÁNICO"
-    when_any: ["saw", "blade", "knife", "grinder_no_guard", "cutter"]
-    jerarquia:
-      eliminacion: ["Corte automatizado"]
-      sustitucion: ["Herramientas con retracción automática"]
-      ingenieria: ["Guardas ajustables", "Freno eléctrico <2s"]
-      administrativos: ["Check pre-uso", "Afilado periódico"]
-      epp: ["Guantes anticorte nivel 5", "Mandil de cuero"]
-    normativas:
-      - "Res. 2400/79 Art. 182"
-      - "NTC 2144 (sierras)"
-
-  # Proyección de partículas
-  - id: proyeccion_particulas
     nombre: "Proyección de partículas"
-    tipo: "MECÁNICO"
-    when_any: ["grinder", "cutting", "sparks", "welding", "drilling", "chipping"]
-    jerarquia:
-      eliminacion: ["Proceso alternativo sin proyección"]
-      ingenieria: ["Pantallas transparentes", "Extracción localizada", "Cabinas"]
-      administrativos: ["Verificar RPM disco", "Zona demarcada", "Sin personas 3m"]
-      epp: ["Careta completa", "Gafas laterales Z87+", "Ropa algodón"]
-    normativas:
-      - "Res. 2400/79 Art. 194-195"
-      - "NTC 2257"
-      - "ANSI Z87.1"
+    descripcion: "Fragmentos o chispas por esmerilado/corte."
+    context: ["industrial"]
+    if_any: ["grinder", "saw", "cutting"]
+    severidad: "ALTA"
+    normativa:
+      - "Resolución 2400/1979 – Guardas y pantallas."
+      - "NTC 2257 – Protección ocular/facial."
+    controles:
+      Ingeniería:
+        - "Pantallas de protección y extracción localizada."
+      Administrativos:
+        - "Inspección de discos/velocidades y mantenimiento."
+      EPP:
+        - "Gafas con protección lateral o careta."
 
-  # Golpes
-  - id: golpes_objetos_movimiento
-    nombre: "Golpes por objetos en movimiento"
-    tipo: "MECÁNICO"
-    when_any: ["swinging_load", "crane_load", "moving_part", "robot_arm"]
-    jerarquia:
-      eliminacion: ["Transporte por conveyor cerrado"]
-      ingenieria: ["Jaulas de seguridad", "Barreras fotosensibles"]
-      administrativos: ["Radio exclusión dinámica", "Señalero certificado"]
-      epp: ["Casco tipo II", "Botas punta composite"]
-    normativas:
-      - "Res. 2400/79 Art. 199-205"
-      - "NTC ISO 12100"
-
-  # Aplastamiento
-  - id: aplastamiento_cargas
-    nombre: "Aplastamiento por cargas o equipos"
-    tipo: "MECÁNICO"
-    when_any: ["heavy_load", "press_machine", "compactor", "vehicle_lifting"]
-    jerarquia:
-      eliminacion: ["Manipulación mecánica 100%"]
-      ingenieria: ["Calzas certificadas", "Válvulas de seguridad", "Soportes redundantes"]
-      administrativos: ["Carga máx 40% capacidad", "2 personas mínimo", "Plan de izaje"]
-      epp: ["Casco resistencia lateral", "Botas dieléctricas"]
-    normativas:
-      - "Res. 2400/79 Art. 350-360"
-      - "NTC 3697"
-
-  # Enganches
-  - id: enganche_ropa_cabello
-    nombre: "Enganche de ropa/cabello"
-    tipo: "MECÁNICO"
-    when_any: ["rotating_equipment", "loose_clothing", "long_hair_exposed", "jewelry_visible"]
-    jerarquia:
-      eliminacion: ["Equipo con carcasa completa"]
-      ingenieria: ["Resguardos con microswitch", "Parada pull-cord"]
-      administrativos: ["Uniforme ceñido obligatorio", "Cabello recogido", "Cero tolerancia joyas"]
-      epp: ["Cofia/redecilla", "Overall sin solapas"]
-    normativas:
-      - "EN 510 (ropa anti-atrapamiento)"
-      - "Res. 2400/79 Art. 176"
-
-  # Herramientas defectuosas
-  - id: herramientas_defectuosas
-    nombre: "Herramientas en mal estado"
-    tipo: "MECÁNICO"  
-    when_any: ["damaged_tool", "cracked_disc", "loose_handle", "worn_blade"]
-    jerarquia:
-      eliminacion: ["Reemplazo inmediato"]
-      sustitucion: ["Herramientas certificadas nuevas"]
-      ingenieria: ["Sistema de bloqueo por defecto"]
-      administrativos: ["Inspección color mensual", "Tarjeta roja=retirar"]
-      epp: ["Según herramienta específica"]
-    normativas:
-      - "Res. 2400/79 Art. 176"
-      - "NTC 2094 (discos)"
-      - "NTC 1106"
-
-# -------- RIESGOS ERGONÓMICOS ----------------------------
-
-  - id: postura_sedentaria_prolongada
-    nombre: "Postura sedentaria prolongada"
+  # ======================
+  # ERGONÓMICOS (extra)
+  # ======================
+  ergo_flexion_cervical_pantalla_baja:
     tipo: "ERGONÓMICO"
-    when_all: ["person", "sitting_posture"]
-    when_any: ["chair_non_ergonomic", "desk_incorrect_height", "prolonged_sitting"]
-    context: "office"
-    jerarquia:
-      eliminacion: ["Estaciones sit-stand"]
-      sustitucion: ["Silla certificada ISO 9241"]
-      ingenieria: ["Monitor brazo ajustable", "Teclado ergonómico", "Reposapiés"]
-      administrativos: ["Pausas activas c/60min", "Rotación tareas", "Gimnasia laboral"]
-      epp: ["Soporte lumbar adicional", "Mousepad con gel"]
-    normativas:
-      - "Res. 4023/1997 (PVD completa)"
-      - "NTC 5871"
-      - "ISO 9241-5"
-
-  - id: flexion_cervical_excesiva
     nombre: "Flexión cervical por pantalla baja"
-    tipo: "ERGONÓMICO"
-    when_any: ["screen_below_eyes", "laptop_on_lap", "tablet_prolonged"]
-    context: "office"
-    jerarquia:
-      eliminacion: ["Monitor externo + teclado"]
-      ingenieria: ["Elevador laptop ajustable", "Brazo monitor"]
-      administrativos: ["Regla 20-20-20", "Ejercicios cervicales c/30min"]
-      epp: ["Lentes con filtro azul"]
-    normativas:
-      - "Res. 4023/97 Art. 5"
-      - "NTC 9241"
+    descripcion: "Cabeza inclinada por tener la pantalla por debajo de la altura de ojos."
+    context: ["office"]
+    if_any: ["screen_below_eyes", "laptop_on_lap"]
+    if_all: ["sitting_posture"]
+    severidad: "MEDIA"
+    normativa:
+      - "Resolución 4023/1997 – PVD (altura de pantalla a nivel de ojos)."
+      - "ISO 9241 – Ergonomía de la interacción persona-sistema."
+    controles:
+      Ingeniería:
+        - "Elevar monitor o usar soporte para laptop."
+      Administrativos:
+        - "Capacitar en ajuste del puesto de trabajo."
 
-  - id: manipulacion_manual_cargas
-    nombre: "Manipulación manual de cargas pesadas"
+  ergo_postura_sedentaria_prolongada:
     tipo: "ERGONÓMICO"
-    when_any: ["person_lifting", "heavy_box", "manual_handling", "bent_back"]
-    jerarquia:
-      eliminacion: ["Mecanización 100%"]
-      sustitucion: ["Ayudas mecánicas (carretillas)"]
-      ingenieria: ["Mesas elevadoras", "Límite 25kg hombres/12.5kg mujeres"]
-      administrativos: ["Técnica levantamiento", "Trabajo en pareja >15kg"]
-      epp: ["Faja solo si médico indica", "Guantes agarre"]
-    normativas:
-      - "Res. 2400/79 Art. 388-390"
-      - "GATISO DME"
-      - "ISO 11228-1"
-
-  - id: movimientos_repetitivos
-    nombre: "Movimientos repetitivos"
-    tipo: "ERGONÓMICO"
-    when_any: ["repetitive_motion", "assembly_line", "typing_intensive", "wrist_deviation"]
-    jerarquia:
-      eliminacion: ["Automatización tarea"]
-      sustitucion: ["Herramientas eléctricas"]
-      ingenieria: ["Diseño que elimine desviaciones", "Altura trabajo codos 90°"]
-      administrativos: ["Rotación c/2h", "Micropausas c/30min", "Limite ciclos/min"]
-      epp: ["Muñequeras solo con prescripción"]
-    normativas:
-      - "GATISO GATI-DME"
-      - "NTC 5723"
-
-  - id: sobreesfuerzo_fisico
-    nombre: "Sobreesfuerzo físico"
-    tipo: "ERGONÓMICO"
-    when_any: ["person_straining", "pushing_heavy", "pulling_load", "awkward_posture"]
-    jerarquia:
-      eliminacion: ["Rediseño que elimine fuerza"]
-      ingenieria: ["Polipastos", "Superficies rodantes", "Palancas"]
-      administrativos: ["Límites fuerza: 25kg empuje, 15kg tracción", "Descansos obligatorios"]
-      epp: ["Calzado antifatiga"]
-    normativas:
-      - "ISO 11228-2"
-      - "Res. 2400/79"
-
-# -------- Tokens de evaluación adicionales ----------------------------
-evaluation_tokens:
-  high_risk:
-    - "multiple_risks_present"
-    - "no_ppe_visible"
-    - "bypass_safety"
-    - "unsafe_behavior"
-  
-  good_practices:
-    - "ppe_complete"
-    - "guards_in_place"
-    - "proper_signage"
-    - "safe_distance"
+    nombre: "Postura sedentaria prolongada"
+    descripcion: "Permanencia sentada por tiempo extendido sin pausas activas."
+    context: ["office"]
+    if_any: ["sitting_posture"]
+    severidad: "BAJA"
+    normativa:
+      - "Resolución 4023/1997 – Pausas cada ~2 horas frente a PVD."
+    controles:
+      Administrativos:
+        - "Pausas activas programadas, alternar tareas, micro-pausas."
