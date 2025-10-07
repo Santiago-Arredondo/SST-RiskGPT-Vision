@@ -5,7 +5,7 @@ import io
 
 from detector import YoloDetector
 from rules_engine import RiskEngine
-from chat_layer import build_chat_response
+from chat_layer import build_enhanced_chat_response  # usar la versión completa
 
 detector = YoloDetector()
 engine = RiskEngine("risk_ontology.yaml")
@@ -30,7 +30,7 @@ async def analyze(image: UploadFile = File(...)):
     })
 
 @app.post("/analyze-chat")
-async def analyze_chat(image: UploadFile = File(...)):
+async def analyze_chat(image: UploadFile = File(...), output_format: str = "all"):
     content = await image.read()
     pil = Image.open(io.BytesIO(content)).convert("RGB")
 
@@ -38,7 +38,7 @@ async def analyze_chat(image: UploadFile = File(...)):
     present = detector.classes_from_dicts(dets)
     risks = engine.infer(present)
     recs = {r["id"]: engine.recommendations(r["id"]) for r in risks}
-    chat = build_chat_response(present, risks, recs)
+    chat = build_enhanced_chat_response(present, risks, recs, output_format=output_format, language="es")
 
     return JSONResponse({
         "classes_present": present,
@@ -47,3 +47,4 @@ async def analyze_chat(image: UploadFile = File(...)):
         "recommendations": recs,
         "chat": chat
     })
+    

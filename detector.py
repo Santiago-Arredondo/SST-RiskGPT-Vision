@@ -2,7 +2,6 @@
 from __future__ import annotations
 import os
 from typing import Any, Dict, List, Optional
-import numpy as np
 
 try:
     from ultralytics import YOLO
@@ -10,19 +9,20 @@ try:
 except Exception:
     YOLO_OK = False
 
-
+# Clases “open-vocabulary” útiles si usas un modelo YOLO-World
 OPEN_VOCAB_PROMPTS = [
-    # Clases útiles en obra/altura (open-vocabulary)
     "ladder", "scaffold", "rebar", "roof", "edge", "harness", "safety harness",
     "guardrail", "platform", "crane hook", "toolbox", "spill", "cable"
 ]
 
+
 class YoloDetector:
     """
-    Pequeño wrapper para Ultralytics YOLO / YOLO-World.
+    Wrapper pequeño para Ultralytics YOLO / YOLO-World.
     - Soporta pesos 'clásicos' (COCO) y 'world' (open-vocabulary).
-    - Normaliza nombres de clase.
+    - Normaliza nombres de clase a etiquetas simples.
     """
+
     def __init__(self, model_path: Optional[str] = None):
         if not YOLO_OK:
             raise RuntimeError("Ultralytics no instalado. pip install ultralytics")
@@ -33,9 +33,9 @@ class YoloDetector:
         self.model = YOLO(self.model_path)
 
         # ¿Es un modelo YOLO-World?
-        self.is_world = ("world" in os.path.basename(self.model_path).lower())
+        self.is_world = "world" in os.path.basename(self.model_path).lower()
 
-        # Clases de nombres para mapping posteriormente
+        # Nombres de clases (si el modelo los expone)
         self.names = None
         try:
             self.names = self.model.names
@@ -61,23 +61,26 @@ class YoloDetector:
         classes_prompt: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """
-        Devuelve lista de dicts con: {'cls': str, 'conf': float, 'box': [x1,y1,x2,y2]}
+        Devuelve lista de dicts con: {'cls': str, 'conf': float, 'box': [x1,y1,x2,y2], 'raw': str}
         """
+        # Configurar clases si es YOLO-World
         if self.is_world:
-            # YOLO-World: define clases “abiertas”
             prompts = classes_prompt or OPEN_VOCAB_PROMPTS
             try:
                 # Algunos builds usan set_classes, otros model.set_classes
                 if hasattr(self.model, "set_classes"):
                     self.model.set_classes(prompts)
                 else:
-                    self.model.set_classes = prompts  # fallback silencioso
+                    # fallback tolerante; algunos wrappers exponen un atributo
+                    self.model.set_classes = prompts  # type: ignore[attr-defined]
             except Exception:
+                # Si falla, seguimos con clases por defecto
                 pass
 
         results = self.model.predict(
             source=image_or_path, imgsz=imgsz, conf=conf, iou=iou, device=device, verbose=False
         )
+
         dets: List[Dict[str, Any]] = []
         if not results:
             return dets
@@ -101,16 +104,51 @@ class YoloDetector:
     @staticmethod
     def _normalize_name(name: str) -> str:
         n = name.lower().strip()
-        # Normaliza variantes comunes
+        # Normaliza variantes comunes a etiquetas consistentes
         mapping = {
+            # Equipos/objetos típicos
             "tv": "screen", "monitor": "screen", "laptop": "laptop", "keyboard": "keyboard",
             "cell phone": "phone", "mobile": "phone", "smartphone": "phone",
             "chair": "chair", "person": "person", "backpack": "backpack",
             "truck": "truck", "car": "car", "bus": "bus", "motorcycle": "motorcycle",
-            # open-vocab típicos:
+            # Open-vocab típicos
             "ladder": "ladder", "scaffold": "scaffold", "rebar": "rebar", "roof": "roof",
             "edge": "edge", "harness": "harness", "safety harness": "harness",
             "guardrail": "guardrail", "platform": "platform", "toolbox": "toolbox",
             "spill": "spill", "cable": "cable"
         }
         return mapping.get(n, n)
+
+    # -------------------------------
+    # Helpers de compatibilidad para API/Evaluator
+    # -------------------------------
+
+    def to_dicts(self, preds) -> List[Dict[str, Any]]:
+        """
+        Acepta la salida de self.predict y devuelve siempre List[Dict].
+        Si ya es lista de dicts, la retorna tal cual.
+        """
+        if not preds:
+            return []
+        if isinstance(preds, list) and preds and isinstance(preds[0], dict):
+            return preds
+        # Fallback ultra defensivo por si alguien pasa otro formato
+        out: List[Dict[str, Any]] = []
+        try:
+            for p in preds:  # type: ignore[assignment]
+                cls_name = p.get("cls") or p.get("class")  # type: ignore[call-arg]
+                conf = p.get("conf", 0.0)
+                box = p.get("box") or p.get("bbox") or []
+                out.append({"cls": cls_name, "conf": float(conf), "box": list(box)})
+        except Exception:
+            # Si no se puede interpretar, devolvemos vacío sin romper el caller
+            return []
+        return out
+
+    def classes_from_dicts(self, dets: List[Dict[str, Any]]) -> List[str]:
+        """
+        Devuelve clases únicas ordenadas a partir de [{cls,...}].
+        """
+        return sorted({d.get("cls") for d in dets if isinstance(d, dict) and d.get("cls")})
+python scripts\generar_items.py
+uvicorn app.main:app --reload

@@ -80,7 +80,7 @@ risks:
     descripcion: "Uso de escalera portátil con persona sobre peldaños sin estabilización o sin tres puntos de apoyo."
     context: ["construction", "industrial", "warehouse", "office"]
     if_any: ["person_on_ladder", "ladder", "ladder_like", "ladder_unstable"]
-    if_all: [""]   # <--- NO exijas 'ladder' aquí
+    if_all: [""]
     severidad: "ALTA"
     normativa:
       - "Resolución 2400/1979 – Escaleras: condiciones y uso."

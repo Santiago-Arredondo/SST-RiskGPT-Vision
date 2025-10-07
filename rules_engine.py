@@ -1,18 +1,14 @@
 # rules_engine.py
 from __future__ import annotations
-import yaml
-from typing import Dict, Any, List, Set, Optional
 from pathlib import Path
+from typing import Any, Dict, List, Set, Optional
+import yaml
 
 class RiskEngine:
     """
-    Carga risk_ontology.yaml y permite inferir riesgos a partir de:
-      - present: set[str] con clases/tokens presentes
-      - ctx_tokens: se derivan para office/industrial/obra
-    Ontología esperada:
-      meta: ...
-      context_tokens: {office:{any:[...]}, industrial:{any:[...]}, obra:{any:[...]}}
-      riesgos: [ {id, nombre, when_any, when_all?, context?, jerarquia[], normas[]} ]
+    Motor de reglas alineado con risk_ontology.yaml (v0.4):
+      - contexts: {nombre: {any: [tokens...]}}
+      - risks: {risk_id: {tipo, nombre, descripcion, context[], if_any[], if_all[], severidad, normativa[], controles{...}}}
     """
 
     def __init__(self, path: str | Path = "risk_ontology.yaml"):
@@ -20,60 +16,77 @@ class RiskEngine:
         if not self.path.exists():
             raise FileNotFoundError(f"Ontología no encontrada: {self.path}")
         data = yaml.safe_load(self.path.read_text(encoding="utf-8")) or {}
-        self.meta: Dict[str, Any] = data.get("meta", {})
-        self.ctx_defs: Dict[str, Dict[str, List[str]]] = data.get("context_tokens", {})
-        self.risks: List[Dict[str, Any]] = data.get("riesgos", [])
-        if not isinstance(self.risks, list):
-            raise ValueError("El nodo 'riesgos' debe ser una lista de dicts.")
+        self.meta: Dict[str, Any] = data.get("meta", {}) or {}
+        self.contexts: Dict[str, Dict[str, List[str]]] = data.get("contexts", {}) or {}
+        self.risks: Dict[str, Dict[str, Any]] = data.get("risks", {}) or {}
 
-    # ---------- utilidades de contexto ----------
-    def infer_contexts(self, present: Set[str]) -> Set[str]:
+        if not isinstance(self.risks, dict):
+            raise ValueError("El nodo 'risks' debe ser un dict {id: {...}}")
+
+        # Mapa de títulos -> claves minúsculas que espera la capa de chat
+        self._ctrl_key_map = {
+            "Eliminación": "eliminacion",
+            "Sustitución": "sustitucion",
+            "Ingeniería": "ingenieria",
+            "Administrativos": "administrativos",
+            "EPP": "epp",
+        }
+
+    # ---------- Contextos ----------
+    def _active_contexts(self, present: Set[str]) -> Set[str]:
         ctx: Set[str] = set()
-        for cname, rule in self.ctx_defs.items():
-            any_list = set(rule.get("any", []))
-            if any_list & present:
-                ctx.add(cname)
+        for name, rule in self.contexts.items():
+            any_tokens = set(rule.get("any", []) or [])
+            if any_tokens & present:
+                ctx.add(name)
         return ctx
 
-    def _ctx_match(self, allowed: Optional[str], active_ctx: Set[str]) -> bool:
-        if not allowed:
-            return True
-        # allowed: "office|industrial|obra"
-        allow = set([s.strip() for s in allowed.split("|") if s.strip()])
-        return bool(allow & active_ctx)
-
-    # ---------- inferencia principal ------------
+    # ---------- Inferencia ----------
     def infer(self, present: List[str] | Set[str]) -> List[Dict[str, Any]]:
         P: Set[str] = set(present)
-        active_ctx = self.infer_contexts(P)
+        ctx = self._active_contexts(P)
+        # Permitimos que las reglas miren también los contextos como “tokens”
+        TOK = P | ctx
 
-        inferred: List[Dict[str, Any]] = []
-        for r in self.risks:
-            rid = r.get("id")
-            name = r.get("nombre", rid)
-            when_any = set(r.get("when_any", []))
-            when_all = set(r.get("when_all", []))
-            ctx_rule = r.get("context")  # "office|industrial|obra" or None
+        out: List[Dict[str, Any]] = []
+        for rid, r in self.risks.items():
+            # Regla de contexto: basta con que uno coincida
+            ctx_list = set(r.get("context", []) or [])
+            ctx_ok = True if not ctx_list else bool(ctx_list & ctx)
 
-            # Debe cumplir contexto si se especifica
-            if not self._ctx_match(ctx_rule, active_ctx):
-                continue
+            # Condiciones “any / all”
+            any_set = set(t for t in (r.get("if_any") or []) if t)
+            all_set = set(t for t in (r.get("if_all") or []) if t)
+            any_ok = True if not any_set else bool(any_set & TOK)
+            all_ok = True if not all_set else all_set.issubset(TOK)
 
-            ok_any = (not when_any) or bool(when_any & P)
-            ok_all = (not when_all) or when_all.issubset(P)
-
-            if ok_any and ok_all:
-                inferred.append({
+            if ctx_ok and any_ok and all_ok:
+                out.append({
                     "id": rid,
-                    "nombre": name,
-                    "jerarquia": list(r.get("jerarquia", [])),
-                    "normas": list(r.get("normas", [])),
+                    "tipo": r.get("tipo", ""),
+                    "nombre": r.get("nombre", rid),
+                    "descripcion": r.get("descripcion", ""),
+                    "severidad": r.get("severidad", "MEDIA"),
                 })
-        return inferred
 
-    # Para UI: recomendaciones por ID
+        # Ordenar por tipo para dar algo estable
+        order = {"LOCATIVO": 0, "MECÁNICO": 1, "ERGONÓMICO": 2}
+        out.sort(key=lambda x: order.get(x.get("tipo", ""), 9))
+        return out
+
+    # ---------- Recomendaciones ----------
     def recommendations(self, rid: str) -> Dict[str, Any]:
-        for r in self.risks:
-            if r.get("id") == rid:
-                return {"jerarquia": r.get("jerarquia", []), "normas": r.get("normas", [])}
-        return {"jerarquia": [], "normas": []}
+        r = self.risks.get(rid)
+        if not r:
+            return {"jerarquia": {}, "normativas": []}
+
+        ctrls = r.get("controles", {}) or {}
+        jerarquia: Dict[str, List[str]] = {}
+        for title, key in self._ctrl_key_map.items():
+            vals = ctrls.get(title) or []
+            if vals:
+                # garantizar lista de strings
+                jerarquia[key] = list(vals)
+
+        normativas = list(r.get("normativa", []) or [])
+        return {"jerarquia": jerarquia, "normativas": normativas}
