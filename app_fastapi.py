@@ -5,10 +5,11 @@ import io
 
 from detector import YoloDetector
 from rules_engine import RiskEngine
-from chat_layer import build_enhanced_chat_response  # usar la versión completa
+from image_tokens import compute_tokens
+from chat_layer import build_enhanced_chat_response
 
-detector = YoloDetector()
-engine = RiskEngine("risk_ontology.yaml")
+engine = RiskEngine(["risk_ontology.yaml", "risk_ontology_ext.yaml"])
+detector = YoloDetector(ontology_paths=["risk_ontology.yaml", "risk_ontology_ext.yaml"])
 
 app = FastAPI(title="API Analizador SST")
 
@@ -18,12 +19,18 @@ async def analyze(image: UploadFile = File(...)):
     pil = Image.open(io.BytesIO(content)).convert("RGB")
 
     dets = detector.to_dicts(detector.predict(pil))
-    present = detector.classes_from_dicts(dets)
-    risks = engine.infer(present)
+    classes_present = detector.classes_from_dicts(dets)
+    active_ctx = engine.active_contexts(set(classes_present))
+    tokens, trace = compute_tokens(dets, engine.meta, active_ctx)
+
+    risks = engine.infer(tokens)
     recs = {r["id"]: engine.recommendations(r["id"]) for r in risks}
 
     return JSONResponse({
-        "classes_present": present,
+        "classes_present": classes_present,
+        "active_contexts": sorted(list(active_ctx)),
+        "tokens": tokens,
+        "token_trace": trace,
         "detections": dets,
         "risks": risks,
         "recommendations": recs
@@ -35,16 +42,21 @@ async def analyze_chat(image: UploadFile = File(...), output_format: str = "all"
     pil = Image.open(io.BytesIO(content)).convert("RGB")
 
     dets = detector.to_dicts(detector.predict(pil))
-    present = detector.classes_from_dicts(dets)
-    risks = engine.infer(present)
+    classes_present = detector.classes_from_dicts(dets)
+    active_ctx = engine.active_contexts(set(classes_present))
+    tokens, trace = compute_tokens(dets, engine.meta, active_ctx)
+
+    risks = engine.infer(tokens)
     recs = {r["id"]: engine.recommendations(r["id"]) for r in risks}
-    chat = build_enhanced_chat_response(present, risks, recs, output_format=output_format, language="es")
+    chat = build_enhanced_chat_response(tokens, risks, recs, output_format=output_format, language="es")
 
     return JSONResponse({
-        "classes_present": present,
+        "classes_present": classes_present,
+        "active_contexts": sorted(list(active_ctx)),
+        "tokens": tokens,
+        "token_trace": trace,
         "detections": dets,
         "risks": risks,
         "recommendations": recs,
         "chat": chat
     })
-    

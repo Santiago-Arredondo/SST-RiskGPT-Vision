@@ -1,0 +1,118 @@
+meta:
+  # lista incremental de clases para modelos open-vocabulary
+  open_vocab:
+    - ladder
+    - ladder like
+    - scaffold
+    - rebar
+    - roof
+    - edge
+    - hole
+    - trench
+    - guardrail
+    - platform
+    - cable
+    - spill
+    - debris
+    - uneven floor
+    - wet floor sign
+    - forklift
+    - rack
+    - shelf
+    - low beam
+    - grinder
+    - saw
+    - cutting
+  thresholds:
+    default_conf: 0.25
+    office_conf: 0.25
+    construction_conf: 0.35
+    warehouse_conf: 0.30
+    industrial_conf: 0.30
+    outdoor_conf: 0.35
+
+# Completa contextos existentes agregando tokens típicos de cada entorno
+contexts:
+  construction:
+    any: ["scaffold", "ladder", "rebar", "roof", "edge", "hole", "trench"]
+  warehouse:
+    any: ["forklift", "rack", "shelf", "cable", "spill", "debris"]
+  industrial:
+    any: ["machine", "press", "gear", "grinder", "saw", "cable", "spill"]
+  outdoor:
+    any: ["roof", "edge", "trench", "hole"]
+
+# Riesgos NUEVOS (IDs no pisan los tuyos)
+risks:
+  R-LOC-EDGE-OPEN:
+    tipo: "LOCATIVO"
+    nombre: "Borde sin protección"
+    descripcion: "Caída a distinto nivel por borde/abertura sin protección colectiva."
+    context: ["construction", "outdoor", "industrial"]
+    if_any: ["edge_open", "person_on_edge"]
+    if_all: []
+    severidad: "CRITICA"
+    normativa:
+      - "Decreto 1072/2015 – Jerarquía de controles"
+      - "Resolución 2400/1979 – Protección perimetral"
+    controles:
+      Eliminación: ["Restringir acceso hasta instalar protección colectiva"]
+      Ingeniería: ["Barandas, rodapié, redes de seguridad, líneas de vida"]
+      Administrativos: ["Permisos de trabajo en altura, supervisión"]
+      EPP: ["Arnés con eslinga y punto de anclaje certificado"]
+
+  R-LOC-HOLE:
+    tipo: "LOCATIVO"
+    nombre: "Hueco en piso sin señalización"
+    descripcion: "Abertura en piso/plataforma sin protección."
+    context: ["construction", "warehouse", "industrial"]
+    if_any: ["hole", "trench"]
+    severidad: "ALTA"
+    normativa:
+      - "OSHA 1910.28"
+      - "ISO 45001 8.1"
+    controles:
+      Ingeniería: ["Cubrir hueco con tapa resistente", "Barandas perimetrales"]
+      Administrativos: ["Señalización temporal y bloqueo"]
+
+  R-LOC-SPILL:
+    tipo: "LOCATIVO"
+    nombre: "Resbalón por derrame"
+    descripcion: "Líquidos/aceites que generan deslizamiento."
+    context: ["warehouse", "industrial", "office"]
+    if_any: ["spill", "wet_floor"]
+    severidad: "MEDIA"
+    normativa:
+      - "OSHA 1910.22"
+      - "NTP 330"
+    controles:
+      Eliminación: ["Limpieza inmediata del derrame"]
+      Administrativos: ["Procedimiento de reporte y contención"]
+      EPP: ["Calzado antideslizante"]
+
+  R-LOC-CABLE:
+    tipo: "LOCATIVO"
+    nombre: "Tropiezo por cableado/obstáculo"
+    descripcion: "Cables o material en paso peatonal."
+    context: ["office", "warehouse", "industrial"]
+    if_any: ["cable", "debris", "floor_irregular"]
+    severidad: "MEDIA"
+    normativa:
+      - "OSHA 1910.22"
+    controles:
+      Ingeniería: ["Canalización o cubrecables"]
+      Administrativos: ["Orden y limpieza (5S)"]
+
+  R-LOC-LADDER:
+    tipo: "LOCATIVO"
+    nombre: "Caída desde escalera"
+    descripcion: "Uso de escalera sin estabilización o sin tres puntos de apoyo."
+    context: ["construction", "industrial", "warehouse", "office"]
+    if_any: ["person_on_ladder", "ladder_unstable", "ladder_like", "ladder"]
+    severidad: "ALTA"
+    normativa:
+      - "Resolución 2400/1979 – Escaleras"
+    controles:
+      Ingeniería: ["Zapatas antideslizantes y estabilizador"]
+      Administrativos: ["Tres puntos de apoyo; no usar último peldaño; ángulo correcto"]
+      EPP: ["Calzado antideslizante; línea de vida si aplica"]
