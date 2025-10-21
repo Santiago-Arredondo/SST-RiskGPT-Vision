@@ -1,5 +1,4 @@
 meta:
-  # lista incremental de clases para modelos open-vocabulary
   open_vocab:
     - ladder
     - ladder like
@@ -12,45 +11,73 @@ meta:
     - guardrail
     - platform
     - cable
-    - spill
+    - wire
+    - cord
+    - extension cord
+    - power cord
+    - hose
+    - rope
     - debris
     - uneven floor
     - wet floor sign
-    - forklift
     - rack
     - shelf
     - low beam
     - grinder
     - saw
     - cutting
+    - forklift
+    - car
+    - vehicle
+    - hoist
+    - car lift
+    - person
+    - screen
+    - laptop
   thresholds:
-    default_conf: 0.25
-    office_conf: 0.25
-    construction_conf: 0.35
-    warehouse_conf: 0.30
+    # Umbrales por contexto (globales)
+    default_conf: 0.22
+    office_conf: 0.22
+    construction_conf: 0.30
+    warehouse_conf: 0.26
     industrial_conf: 0.30
-    outdoor_conf: 0.35
+    outdoor_conf: 0.30
+  class_thresholds:
+    # Afinado por clase dentro de cada contexto
+    warehouse:
+      cable: 0.20
+      rope: 0.20
+      hose: 0.20
+      wire: 0.20
+      cord: 0.20
+    industrial:
+      cable: 0.22
+      rope: 0.22
+      hose: 0.22
+      wire: 0.22
+      cord: 0.22
 
-# Completa contextos existentes agregando tokens típicos de cada entorno
 contexts:
   construction:
     any: ["scaffold", "ladder", "rebar", "roof", "edge", "hole", "trench"]
   warehouse:
-    any: ["forklift", "rack", "shelf", "cable", "spill", "debris"]
+    any: ["forklift", "rack", "shelf", "cable", "rope", "hose", "debris"]
   industrial:
-    any: ["machine", "press", "gear", "grinder", "saw", "cable", "spill"]
+    any: ["machine", "press", "gear", "grinder", "saw", "cable", "hose", "vehicle"]
   outdoor:
     any: ["roof", "edge", "trench", "hole"]
+  office:
+    any: ["desk", "chair", "screen", "laptop", "cable"]
 
-# Riesgos NUEVOS (IDs no pisan los tuyos)
 risks:
+  # -------- LOCATIVOS ----------
   R-LOC-EDGE-OPEN:
     tipo: "LOCATIVO"
     nombre: "Borde sin protección"
     descripcion: "Caída a distinto nivel por borde/abertura sin protección colectiva."
-    context: ["construction", "outdoor", "industrial"]
-    if_any: ["edge_open", "person_on_edge"]
-    if_all: []
+    context: ["construction", "outdoor"]
+    if_any: ["edge_open"]
+    if_all: ["person_on_edge"]
     severidad: "CRITICA"
     normativa:
       - "Decreto 1072/2015 – Jerarquía de controles"
@@ -68,9 +95,6 @@ risks:
     context: ["construction", "warehouse", "industrial"]
     if_any: ["hole", "trench"]
     severidad: "ALTA"
-    normativa:
-      - "OSHA 1910.28"
-      - "ISO 45001 8.1"
     controles:
       Ingeniería: ["Cubrir hueco con tapa resistente", "Barandas perimetrales"]
       Administrativos: ["Señalización temporal y bloqueo"]
@@ -82,9 +106,6 @@ risks:
     context: ["warehouse", "industrial", "office"]
     if_any: ["spill", "wet_floor"]
     severidad: "MEDIA"
-    normativa:
-      - "OSHA 1910.22"
-      - "NTP 330"
     controles:
       Eliminación: ["Limpieza inmediata del derrame"]
       Administrativos: ["Procedimiento de reporte y contención"]
@@ -93,9 +114,9 @@ risks:
   R-LOC-CABLE:
     tipo: "LOCATIVO"
     nombre: "Tropiezo por cableado/obstáculo"
-    descripcion: "Cables o material en paso peatonal."
+    descripcion: "Cables, mangueras o sogas en paso peatonal."
     context: ["office", "warehouse", "industrial"]
-    if_any: ["cable", "debris", "floor_irregular"]
+    if_any: ["cable", "debris", "floor_irregular", "foot_near_obstacle"]
     severidad: "MEDIA"
     normativa:
       - "OSHA 1910.22"
@@ -103,16 +124,64 @@ risks:
       Ingeniería: ["Canalización o cubrecables"]
       Administrativos: ["Orden y limpieza (5S)"]
 
-  R-LOC-LADDER:
+  # Variante inminente (si quieres marcar más fuerte)
+  R-LOC-CABLE-IMMINENT:
     tipo: "LOCATIVO"
-    nombre: "Caída desde escalera"
-    descripcion: "Uso de escalera sin estabilización o sin tres puntos de apoyo."
-    context: ["construction", "industrial", "warehouse", "office"]
-    if_any: ["person_on_ladder", "ladder_unstable", "ladder_like", "ladder"]
+    nombre: "Tropiezo inminente por cable/obstáculo"
+    descripcion: "Obstáculo en la banda de los pies con persona presente."
+    context: ["warehouse", "industrial", "office"]
+    if_all: ["person", "foot_near_obstacle"]
     severidad: "ALTA"
-    normativa:
-      - "Resolución 2400/1979 – Escaleras"
     controles:
-      Ingeniería: ["Zapatas antideslizantes y estabilizador"]
-      Administrativos: ["Tres puntos de apoyo; no usar último peldaño; ángulo correcto"]
-      EPP: ["Calzado antideslizante; línea de vida si aplica"]
+      Eliminación: ["Retirar el obstáculo inmediatamente"]
+      Administrativos: ["Demarcar rutas peatonales y asegurar cableado"]
+
+  # -------- MECÁNICOS ----------
+  R-MEC-UNDER-LIFT:
+    tipo: "MECÁNICO"
+    nombre: "Persona bajo vehículo elevado sin aseguramiento"
+    descripcion: "Riesgo de aplastamiento por vehículo en elevador sin soportes seguros."
+    context: ["industrial", "warehouse"]
+    if_any: ["vehicle_on_lift"]
+    if_all: ["person_under_vehicle"]
+    severidad: "CRITICA"
+    controles:
+      Eliminación: ["Evitar trabajo bajo carga suspendida"]
+      Ingeniería: ["Caballetes/soportes certificados; bloqueo mecánico"]
+      Administrativos: ["LOTO del elevador; zona demarcada; supervisión"]
+      EPP: ["Calzado de seguridad; protección craneal"]
+
+  R-MEC-GUARD-MISSING:
+    tipo: "MECÁNICO"
+    nombre: "Partes móviles sin resguardo"
+    descripcion: "Rodillos/correas/engranes expuestos en operación."
+    context: ["industrial","warehouse"]
+    if_any: ["moving_part","roller","belt","gear","grinder","saw","cutting","guard_missing"]
+    if_all: ["machine"]
+    severidad: "CRITICA"
+    controles:
+      Ingeniería: ["Resguardos fijos o enclavados","Paro de emergencia accesible"]
+      Administrativos: ["LOTO en mantenimiento","Capacitación específica"]
+
+  # -------- ERGONÓMICOS (heurísticos mínimos sin pose) ----------
+  R-ERGO-TRUNK-FLEXION:
+    tipo: "ERGONÓMICO"
+    nombre: "Flexión lumbar elevada"
+    descripcion: "Inclinación del tronco >45° (heurística sin pose)."
+    context: ["warehouse","industrial","office"]
+    if_any: ["trunk_flexion_high"]
+    severidad: "ALTA"
+    controles:
+      Ingeniería: ["Mesas a altura adecuada","Elevadores de carga"]
+      Administrativos: ["Técnicas de levantamiento","Rotación de tareas"]
+
+  R-ERGO-NECK-SCREEN:
+    tipo: "ERGONÓMICO"
+    nombre: "Flexión cervical por pantalla baja"
+    descripcion: "Centro de pantalla por debajo de la línea de ojos (heurística)."
+    context: ["office","industrial"]
+    if_any: ["screen_below_eyes"]
+    severidad: "MEDIA"
+    controles:
+      Ingeniería: ["Elevar monitor a altura de ojos"]
+      Administrativos: ["Pausas activas, ajuste del puesto"]

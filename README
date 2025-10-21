@@ -51,3 +51,7 @@ python ui_gradio.py
 python ui_gradio_video.py
 # Abrir http://127.0.0.1:7860
 # Sugerencia: Confianza 0.25–0.35, IoU 0.6
+
+# Asegúrate de que la ruta sea la correcta del último entrenamiento
+cp runs/detect/train/weights/best.pt models/best.pt
+

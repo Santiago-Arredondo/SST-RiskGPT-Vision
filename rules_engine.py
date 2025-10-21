@@ -29,15 +29,11 @@ def _merge_controles(a_ctrl: Dict[str, List[str]] | None, b_ctrl: Dict[str, List
     return out
 
 def _merge_risk_entry(a: Dict[str, Any], b: Dict[str, Any]) -> Dict[str, Any]:
-    # Mantén los textos base; agrega listas desde b
     out = copy.deepcopy(a)
-    # Campos texto: conserva los del original si existen
     for k in ["tipo", "nombre", "descripcion", "severidad"]:
         out[k] = out.get(k, b.get(k))
-    # Listas que se unen
     for k in ["context", "if_any", "if_all", "normativa"]:
         out[k] = _merge_lists_unique(a.get(k, []), b.get(k, []))
-    # Controles: unir por categoría
     out["controles"] = _merge_controles(a.get("controles"), b.get("controles"))
     return out
 
@@ -51,13 +47,6 @@ def _merge_risks(a: Dict[str, Any], b: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 class RiskEngine:
-    """
-    Motor de reglas v0.4 con fusión de múltiples ontologías.
-    Estructura soportada:
-      - contexts: {nombre: {any: [tokens...]}}
-      - risks: {id: {tipo, nombre, descripcion, context[], if_any[], if_all[], severidad, normativa[], controles{TITULO:[..]}}}
-    """
-
     def __init__(self, paths: Union[str, Path, List[Union[str, Path]]] = None):
         if paths is None:
             paths = ["risk_ontology.yaml", "risk_ontology_ext.yaml"]
@@ -92,7 +81,19 @@ class RiskEngine:
             "EPP": "epp",
         }
 
-    # Contextos activos
+    def _normalize_tokens(self, tokens: Union[List[str], Set[str]]) -> Set[str]:
+        mapping = {
+            "wet floor": "wet floor sign",
+            "ladder_like": "ladder like",
+            "cell phone": "phone", "mobile": "phone", "smartphone": "phone",
+            "monitor": "screen", "tv": "screen",
+        }
+        normalized = set()
+        for t in tokens:
+            key = t.lower().strip().replace("_", " ")
+            normalized.add(mapping.get(key, key))
+        return normalized
+
     def active_contexts(self, present: Set[str]) -> Set[str]:
         ctx: Set[str] = set()
         for name, rule in self.contexts.items():
@@ -101,12 +102,10 @@ class RiskEngine:
                 ctx.add(name)
         return ctx
 
-    # Inferencia
-    def infer(self, present_tokens: List[str] | Set[str]) -> List[Dict[str, Any]]:
-        P: Set[str] = set(present_tokens)
+    def infer(self, present_tokens: Union[List[str], Set[str]]) -> List[Dict[str, Any]]:
+        P: Set[str] = self._normalize_tokens(present_tokens)
         ctx = self.active_contexts(P)
         TOK = P | ctx
-
         out: List[Dict[str, Any]] = []
         for rid, r in self.risks.items():
             ctx_list = set(r.get("context", []) or [])
@@ -123,12 +122,10 @@ class RiskEngine:
                     "descripcion": r.get("descripcion", ""),
                     "severidad": r.get("severidad", "MEDIA"),
                 })
-
         order = {"LOCATIVO": 0, "MECÁNICO": 1, "ERGONÓMICO": 2}
         out.sort(key=lambda x: order.get(x.get("tipo", ""), 9))
         return out
 
-    # Recomendaciones
     def recommendations(self, rid: str) -> Dict[str, Any]:
         r = self.risks.get(rid)
         if not r:

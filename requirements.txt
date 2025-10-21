@@ -1,22 +1,22 @@
-# --- Core detección ---
-ultralytics>=8.3.193,<8.4
-
-# --- UI / APIs ---
-gradio==4.44.1
+# --- Servidor y APIs ---
 fastapi==0.111.0
 uvicorn[standard]==0.30.5
+httpx==0.24.1
 
-# --- Visión / datos ---
-# (Subo OpenCV a 4.10.x: ruedas más recientes y compatibles con Py312)
+# --- Visión / procesamiento de imagen ---
 opencv-python==4.10.0.84
 pillow==10.4.0
-# (CRÍTICO) MediaPipe 0.10.x necesita NumPy 1.x
 numpy==1.26.4
 pandas==2.2.2
 PyYAML==6.0.2
 albumentations==1.4.8
 
-# --- Tipado / FastAPI deps ---
+# --- Modelos y detección ---
+ultralytics==8.2.103
+mediapipe==0.10.14  # compatible con NumPy 1.x
+
+# --- UI / visualización ---
+gradio==4.15.0
+
+# --- Tipado y validación ---
 pydantic==2.8.2
-# fijado (no >=) para evitar que suba a una versión que exija NumPy 2.x
-mediapipe==0.10.14

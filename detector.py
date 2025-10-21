@@ -11,7 +11,8 @@ except Exception:
 DEFAULT_OPEN_VOCAB = [
     "ladder","ladder like","scaffold","rebar","roof","edge","hole","trench",
     "guardrail","platform","cable","spill","debris","uneven floor","wet floor sign",
-    "rack","shelf","low beam","grinder","saw","cutting","forklift","machine","press","gear","person"
+    "rack","shelf","low beam","grinder","saw","cutting","forklift","machine","press","gear",
+    "car","vehicle","hoist","car lift","person"
 ]
 
 def _load_open_vocab(paths: List[str]) -> List[str]:
@@ -29,7 +30,7 @@ class YoloDetector:
     def __init__(self, model_path: Optional[str] = None, ontology_paths: Optional[List[str]] = None):
         if not YOLO_OK:
             raise RuntimeError("Ultralytics no instalado. pip install ultralytics")
-        self.model_path = model_path or self._auto_model()
+        self.model_path = model_path or "runs/detect/train4/weights/best.pt"
         if not os.path.exists(self.model_path):
             raise FileNotFoundError(f"No existe el modelo: {self.model_path}")
         self.model = YOLO(self.model_path)
@@ -47,7 +48,7 @@ class YoloDetector:
                 return p
         return "yolov8m.pt"
 
-    def predict(self, image_or_path: Any, conf: float = 0.25, iou: float = 0.6,
+    def predict(self, image_or_path: Any, conf: float = 0.14, iou: float = 0.6,
                 imgsz: int = 640, device: str = "cpu",
                 classes_prompt: Optional[List[str]] = None) -> List[Dict[str, Any]]:
         if self.is_world:
@@ -86,7 +87,7 @@ class YoloDetector:
             "cell phone": "phone", "mobile": "phone", "smartphone": "phone",
             "monitor": "screen", "tv": "screen",
             "ladder like": "ladder like",
-            "wet floor": "wet floor sign",  # por si el modelo lo normaliza así
+            "wet floor": "wet floor sign",
         }
         return mapping.get(n, n)
 
